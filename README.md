@@ -15,7 +15,7 @@ Jetpack Glanceを使用し、複数のウィジェットをそれぞれ異なる
 
 | アプリ画面 | ウィジェット表示 (緑/OK) | ウィジェット表示 (赤/Alert) |
 | :---: | :---: | :---: |
-| <img src="app/src/main/res/drawable/app_icon.png" width="200"> | ![Widget OK](https://via.placeholder.com/150/159a31/FFFFFF?text=3/5+12:34) | ![Widget Alert](https://via.placeholder.com/150/f44336/FFFFFF?text=2/5+12:35) |
+| <img src="app/src/main/res/drawable/ic_launcher.png" width="200"> | ![Widget OK](https://placehold.jp/24/159a31/ffffff/150x150.png?text=5/5%0A12:34) | ![Widget Alert](https://placehold.jp/24/f44336/ffffff/150x150.png?text=2/5%0A12:35) |
 
 ## セットアップとビルド方法
 
