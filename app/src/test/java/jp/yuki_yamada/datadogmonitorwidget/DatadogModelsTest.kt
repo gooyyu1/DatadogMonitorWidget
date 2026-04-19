@@ -1,5 +1,10 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
+import com.datadog.api.client.v1.model.Monitor as DatadogMonitor
+import com.datadog.api.client.v1.model.MonitorOverallStates
+import com.datadog.api.client.v1.model.MonitorSearchResult
+import com.datadog.api.client.v1.model.MonitorState
+import com.datadog.api.client.v1.model.MonitorStateGroup
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -81,16 +86,38 @@ class DatadogModelsTest {
     }
 
     @Test
-    fun `monitor detail response maps multi and group statuses`() {
-        val response = MonitorDetailResponse(
-            id = 7L,
-            name = "multi monitor",
-            overallState = "Warn",
-            multi = true,
-            state = MonitorState(
-                groups = mapOf(
-                    "env:prod" to MonitorStateGroup(status = "Alert"),
-                    "env:stg" to MonitorStateGroup(status = "OK")
+    fun `monitor search result maps to app monitor`() {
+        val result = MonitorSearchResult()
+        setPrivateField(result, "id", 99L)
+        setPrivateField(result, "name", "search monitor")
+        setPrivateField(result, "status", MonitorOverallStates.ALERT)
+
+        val monitor = result.toMonitorOrNull()
+
+        assertEquals(99L, monitor?.id)
+        assertEquals("search monitor", monitor?.name)
+        assertEquals("Alert", monitor?.status)
+    }
+
+    @Test
+    fun `datadog monitor maps multi and group statuses`() {
+        val prodGroup = MonitorStateGroup()
+        setPrivateField(prodGroup, "status", MonitorOverallStates.ALERT)
+        val stgGroup = MonitorStateGroup()
+        setPrivateField(stgGroup, "status", MonitorOverallStates.OK)
+
+        val response = DatadogMonitor()
+        setPrivateField(response, "id", 7L)
+        setPrivateField(response, "name", "multi monitor")
+        setPrivateField(response, "overallState", MonitorOverallStates.WARN)
+        setPrivateField(response, "multi", true)
+        setPrivateField(
+            response,
+            "state",
+            MonitorState().groups(
+                linkedMapOf(
+                    "env:prod" to prodGroup,
+                    "env:stg" to stgGroup
                 )
             )
         )
@@ -104,5 +131,11 @@ class DatadogModelsTest {
         assertEquals(2, detail.groupStatuses.size)
         assertEquals(MonitorStatus.ALERT, detail.groupStatuses[0].status)
         assertEquals(MonitorStatus.OK, detail.groupStatuses[1].status)
+    }
+
+    private fun setPrivateField(target: Any, fieldName: String, value: Any?) {
+        val field = target.javaClass.getDeclaredField(fieldName)
+        field.isAccessible = true
+        field.set(target, value)
     }
 }

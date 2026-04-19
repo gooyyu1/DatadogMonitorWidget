@@ -48,7 +48,7 @@ Jetpack Glanceを使用し、複数のウィジェットをそれぞれ異なる
 
 - **UI**: Jetpack Compose, Jetpack Glance (Widget)
 - **非同期処理/バックグラウンド**: Kotlin Coroutines, WorkManager
-- **ネットワーク**: Retrofit2, OkHttp3, Kotlinx Serialization
+- **ネットワーク**: datadog-api-client-java, Kotlinx Serialization
 - **データ保存**: Jetpack DataStore (Preferences)
 
 ## ライセンス
