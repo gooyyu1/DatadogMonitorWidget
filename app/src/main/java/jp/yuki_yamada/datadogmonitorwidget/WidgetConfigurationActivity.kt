@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -68,7 +71,10 @@ class WidgetConfigurationActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             DatadogMonitorWidgetTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    contentWindowInsets = WindowInsets.safeDrawing
+                ) { innerPadding ->
                     ConfigurationScreen(
                         appWidgetId = appWidgetId,
                         modifier = Modifier.padding(innerPadding),
@@ -148,16 +154,17 @@ fun ConfigurationScreen(
 
         Text("Datadog Site (Region)", fontWeight = FontWeight.Bold)
         val sites = mapOf(
-            "US1" to "https://api.datadoghq.com/",
-            "US3" to "https://api.us3.datadoghq.com/",
-            "US5" to "https://api.us5.datadoghq.com/",
-            "EU1" to "https://api.datadoghq.eu/",
-            "AP1" to "https://api.ap1.datadoghq.com/",
-            "US1-FED" to "https://api.ddog-gov.com/"
+            "US1" to ("https://api.datadoghq.com/" to "https://app.datadoghq.com/"),
+            "US3" to ("https://api.us3.datadoghq.com/" to "https://us3.datadoghq.com/"),
+            "US5" to ("https://api.us5.datadoghq.com/" to "https://us5.datadoghq.com/"),
+            "EU1" to ("https://api.datadoghq.eu/" to "https://app.datadoghq.eu/"),
+            "AP1" to ("https://api.ap1.datadoghq.com/" to "https://ap1.datadoghq.com/"),
+            "US1-FED" to ("https://api.ddog-gov.com/" to "https://app.ddog-gov.com/")
         )
-        sites.forEach { (name, url) ->
+        sites.forEach { (name, urls) ->
+            val (apiUrl, _) = urls
             Row(verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(selected = siteUrl == url, onClick = { siteUrl = url })
+                RadioButton(selected = siteUrl == apiUrl, onClick = { siteUrl = apiUrl })
                 Text(text = name)
             }
         }
@@ -177,6 +184,7 @@ fun ConfigurationScreen(
         Button(
             onClick = {
                 scope.launch {
+                    val appUrl = sites.values.find { it.first == siteUrl }?.second ?: "https://app.datadoghq.com/"
                     val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
                     updateAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId) { prefs ->
                         prefs.toMutablePreferences().apply {
@@ -185,6 +193,7 @@ fun ConfigurationScreen(
                             this[stringPreferencesKey("query")] = query
                             this[stringPreferencesKey("interval")] = interval
                             this[stringPreferencesKey("site_url")] = siteUrl
+                            this[stringPreferencesKey("app_url")] = appUrl
                         }
                     }
                     MonitorWidget().update(context, glanceId)

@@ -20,9 +20,9 @@ import androidx.compose.ui.unit.dp
 import jp.yuki_yamada.datadogmonitorwidget.MonitorStatus
 
 @Composable
-fun MonitorRow(name: String, status: MonitorStatus) {
+fun MonitorRow(name: String, status: MonitorStatus, modifier: Modifier = Modifier) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(

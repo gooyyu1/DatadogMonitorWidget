@@ -1,9 +1,12 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +14,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,8 +40,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.glance.appwidget.GlanceAppWidgetManager
+import androidx.glance.appwidget.state.getAppWidgetState
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import jp.yuki_yamada.datadogmonitorwidget.ui.MonitorRow
 import jp.yuki_yamada.datadogmonitorwidget.ui.StatusCountBadge
 import jp.yuki_yamada.datadogmonitorwidget.ui.theme.DatadogMonitorWidgetTheme
@@ -46,14 +57,21 @@ import kotlinx.serialization.json.Json
 class MonitorBreakdownActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val monitorId = intent.getLongExtra(EXTRA_MONITOR_ID, -1)
         val monitorName = intent.getStringExtra(EXTRA_MONITOR_NAME).orEmpty()
         val groupStatusesJson = intent.getStringExtra(EXTRA_GROUP_STATUSES_JSON).orEmpty()
+        val appWidgetId = intent.getIntExtra(EXTRA_APPWIDGET_ID, -1)
 
         enableEdgeToEdge()
         setContent {
             DatadogMonitorWidgetTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    contentWindowInsets = WindowInsets.safeDrawing
+                ) { innerPadding ->
                     MonitorBreakdownScreen(
+                        appWidgetId = appWidgetId,
+                        monitorId = monitorId,
                         monitorName = monitorName,
                         groupStatusesJson = groupStatusesJson,
                         modifier = Modifier
@@ -66,27 +84,61 @@ class MonitorBreakdownActivity : ComponentActivity() {
     }
 
     companion object {
+        const val EXTRA_MONITOR_ID = "monitor_id"
         const val EXTRA_MONITOR_NAME = "monitor_name"
         const val EXTRA_GROUP_STATUSES_JSON = "group_statuses_json"
+        const val EXTRA_APPWIDGET_ID = "appwidget_id"
     }
 }
 
 @Composable
 private fun MonitorBreakdownScreen(
+    appWidgetId: Int,
+    monitorId: Long,
     monitorName: String,
     groupStatusesJson: String,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val json = remember { Json { ignoreUnknownKeys = true } }
     var groups by rememberSaveable(stateSaver = monitorGroupStatusesSaver) {
         mutableStateOf(emptyList())
     }
     var isLoading by rememberSaveable { mutableStateOf(true) }
+    var appUrl by remember { mutableStateOf("https://app.datadoghq.com/") }
 
-    LaunchedEffect(groupStatusesJson) {
-        groups = withContext(Dispatchers.Default) {
+    val statusTabs = remember {
+        listOf(
+            MonitorStatus.ALERT,
+            MonitorStatus.WARN,
+            MonitorStatus.OK,
+            MonitorStatus.NO_DATA
+        )
+    }
+    var selectedTabIndex by rememberSaveable(groupStatusesJson) { mutableIntStateOf(0) }
+    var hasDefaultTabBeenSet by rememberSaveable(groupStatusesJson) { mutableStateOf(false) }
+
+    LaunchedEffect(groupStatusesJson, appWidgetId) {
+        val decodedGroups = withContext(Dispatchers.Default) {
             decodeMonitorGroupStatuses(json, groupStatusesJson)
         }
+        groups = decodedGroups
+
+        if (!hasDefaultTabBeenSet && decodedGroups.isNotEmpty()) {
+            val firstNonEmptyIndex = statusTabs.indexOfFirst { status ->
+                decodedGroups.any { it.status == status }
+            }
+            if (firstNonEmptyIndex != -1) {
+                selectedTabIndex = firstNonEmptyIndex
+            }
+            hasDefaultTabBeenSet = true
+        }
+
+        // Fetch appUrl
+        val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
+        val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
+        appUrl = prefs[stringPreferencesKey("app_url")] ?: "https://app.datadoghq.com/"
+
         isLoading = false
     }
 
@@ -110,13 +162,6 @@ private fun MonitorBreakdownScreen(
                 CircularProgressIndicator()
             }
         } else {
-            val statusTabs = listOf(
-                MonitorStatus.ALERT,
-                MonitorStatus.WARN,
-                MonitorStatus.OK,
-                MonitorStatus.NO_DATA
-            )
-            var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
             val filteredGroups = groups.filter { it.status == statusTabs[selectedTabIndex] }
 
             TabRow(
@@ -178,7 +223,24 @@ private fun MonitorBreakdownScreen(
                     items(filteredGroups) { group ->
                         MonitorRow(
                             name = formatGroupName(group.name),
-                            status = group.status
+                            status = group.status,
+                            modifier = Modifier.clickable {
+                                if (monitorId > 0) {
+                                    val monitorUrl = buildString {
+                                        append("${appUrl.trimEnd('/')}/monitors/$monitorId?q=${Uri.encode(group.name)}")
+                                        group.lastTriggeredTs?.let { ts ->
+                                            val fromTs = ts - 3600
+                                            val now = System.currentTimeMillis() / 1000
+                                            append("&from_ts=$fromTs")
+                                            append("&start=$fromTs")
+                                            append("&to_ts=$now")
+                                            append("&end=$now")
+                                        }
+                                    }
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(monitorUrl))
+                                    context.startActivity(intent)
+                                }
+                            }
                         )
                     }
                 }
@@ -222,15 +284,16 @@ internal fun decodeMonitorGroupStatuses(json: Json, groupStatusesJson: String): 
         .sortedBy { monitorStatusPriority(it.status) }
 
 internal fun saveMonitorGroupStatuses(groups: List<MonitorGroupStatus>): List<String> =
-    groups.flatMap { listOf(it.name, it.status.name) }
+    groups.flatMap { listOf(it.name, it.status.name, it.lastTriggeredTs?.toString() ?: "") }
 
 internal fun restoreMonitorGroupStatuses(saved: List<String>): List<MonitorGroupStatus> {
-    if (saved.size % 2 != 0) return emptyList()
+    if (saved.size % 3 != 0) return emptyList()
     return runCatching {
-        saved.chunked(2).map { chunk ->
+        saved.chunked(3).map { chunk ->
             MonitorGroupStatus(
                 name = chunk[0],
-                status = MonitorStatus.valueOf(chunk[1])
+                status = MonitorStatus.valueOf(chunk[1]),
+                lastTriggeredTs = chunk[2].toLongOrNull()
             )
         }
     }.getOrDefault(emptyList())

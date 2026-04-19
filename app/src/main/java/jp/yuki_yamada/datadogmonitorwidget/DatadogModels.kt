@@ -51,7 +51,9 @@ data class StatusCounts(
 @Serializable
 data class MonitorGroupStatus(
     val name: String,
-    val status: MonitorStatus
+    val status: MonitorStatus,
+    @SerialName("last_triggered_ts")
+    val lastTriggeredTs: Long? = null
 )
 
 @Serializable
@@ -65,7 +67,7 @@ data class MonitorDetail(
     val groupStatuses: List<MonitorGroupStatus> = emptyList()
 ) {
     val isMultiAlert: Boolean
-        get() = isMultiMonitor
+        get() = isMultiMonitor || groupStatuses.size > 1
 
     val resolvedStatusCounts: StatusCounts?
         get() = groupStatuses.takeIf { it.isNotEmpty() }?.let { groups ->
@@ -98,7 +100,9 @@ data class MonitorStateGroup(
     val name: String? = null,
     val status: String? = null,
     @SerialName("overall_state")
-    val overallState: String? = null
+    val overallState: String? = null,
+    @SerialName("last_triggered_ts")
+    val lastTriggeredTs: Long? = null
 )
 
 fun Monitor.toMonitorDetail(): MonitorDetail = MonitorDetail(
@@ -113,7 +117,8 @@ fun MonitorDetailResponse.toMonitorDetail(fallbackStatus: MonitorStatus): Monito
         ?.map { (groupKey, groupState) ->
             MonitorGroupStatus(
                 name = groupState.name?.takeIf { it.isNotBlank() } ?: groupKey,
-                status = MonitorStatus.fromRaw(groupState.status ?: groupState.overallState)
+                status = MonitorStatus.fromRaw(groupState.status ?: groupState.overallState),
+                lastTriggeredTs = groupState.lastTriggeredTs
             )
         }
         .orEmpty()
