@@ -303,8 +303,12 @@ private suspend fun fetchMonitorDetailOrFallback(
         MonitorDetailFetchResult(
             monitorDetail = response.toMonitorDetail(fallbackStatus = monitor.status)
         )
-    } catch (_: ApiException) {
-        Log.w(MONITOR_DETAIL_TAG, "Failed to fetch monitor detail from Datadog API for monitorId=${monitor.id}")
+    } catch (e: ApiException) {
+        Log.w(
+            MONITOR_DETAIL_TAG,
+            "Failed to fetch monitor detail from Datadog API for monitorId=${monitor.id}, status=${e.code}, response=${e.responseBody}",
+            e
+        )
         MonitorDetailFetchResult(monitorDetail = monitor)
     } catch (e: Exception) {
         Log.w(MONITOR_DETAIL_TAG, "Unexpected error while fetching monitor detail for monitorId=${monitor.id}", e)

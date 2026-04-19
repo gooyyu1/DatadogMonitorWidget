@@ -38,7 +38,7 @@ android {
         resources {
             excludes += "/META-INF/NOTICE*"
             excludes += "/META-INF/LICENSE*"
-            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/DEPENDENCIES*"
         }
     }
 }
