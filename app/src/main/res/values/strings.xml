@@ -4,5 +4,5 @@
     <string name="monitor_breakdown_title">Monitor breakdown</string>
     <string name="no_monitor_data">No monitor data</string>
     <string name="open_datadog_app">Open Datadog app</string>
-    <string name="open_widget_settings">Open widget settings</string>
+    <string name="open_widget_settings">Open settings</string>
 </resources>
