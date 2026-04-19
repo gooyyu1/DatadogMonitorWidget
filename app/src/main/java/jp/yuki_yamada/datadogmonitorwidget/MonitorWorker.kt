@@ -1,7 +1,6 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
 import android.content.Context
-import android.util.Log
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
@@ -15,11 +14,6 @@ import androidx.work.WorkerParameters
 import androidx.work.ListenableWorker
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.encodeToString
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -85,11 +79,9 @@ class MonitorWorker(
 
             val monitorResponse = json.decodeFromString<MonitorSearchResponse>(responseBodyString)
             val monitors = monitorResponse.monitors
-            val monitorDetails = runCatching {
-                parseMonitorDetails(json, responseBodyString)
-            }.onFailure { error ->
-                Log.w("MonitorWorker", "Failed to parse monitor details", error)
-            }.getOrDefault(emptyList())
+            val monitorDetails = monitors
+                .map { it.toMonitorDetail() }
+                .sortedBy { monitorStatusPriority(it.status) }
             val total = monitors.size
             val okCount = monitors.count { MonitorStatus.fromRaw(it.status) == MonitorStatus.OK }
             val alertCount = monitors.count { MonitorStatus.fromRaw(it.status) == MonitorStatus.ALERT }
@@ -170,83 +162,4 @@ class MonitorWorker(
             }
         }
     }
-
-    private fun parseMonitorDetails(json: Json, responseBodyString: String): List<MonitorDetail> {
-        val root = json.parseToJsonElement(responseBodyString).asJsonObjectOrNull() ?: return emptyList()
-        val monitorArray = root["monitors"]?.asJsonArrayOrNull() ?: return emptyList()
-
-        return monitorArray.mapNotNull { monitorElement ->
-            val monitorObject = monitorElement.asJsonObjectOrNull() ?: return@mapNotNull null
-            val name = monitorObject["name"]?.asStringOrNull()?.takeIf { it.isNotBlank() } ?: "Unnamed monitor"
-            val groupStatuses = parseGroupStatuses(monitorObject)
-                .sortedBy { monitorStatusPriority(it.status) }
-
-            if (groupStatuses.isNotEmpty()) {
-                val statusCounts = StatusCounts(
-                    ok = groupStatuses.count { it.status == MonitorStatus.OK },
-                    warn = groupStatuses.count { it.status == MonitorStatus.WARN },
-                    alert = groupStatuses.count { it.status == MonitorStatus.ALERT },
-                    noData = groupStatuses.count { it.status == MonitorStatus.NO_DATA }
-                )
-                val summaryStatus = when {
-                    statusCounts.alert > 0 -> MonitorStatus.ALERT
-                    statusCounts.warn > 0 -> MonitorStatus.WARN
-                    statusCounts.ok > 0 -> MonitorStatus.OK
-                    else -> MonitorStatus.NO_DATA
-                }
-                MonitorDetail(
-                    name = name,
-                    status = summaryStatus,
-                    statusCounts = statusCounts,
-                    groupStatuses = groupStatuses
-                )
-            } else {
-                val singleStatus = MonitorStatus.fromRaw(
-                    monitorObject["status"]?.asStringOrNull()
-                        ?: monitorObject["overall_state"]?.asStringOrNull()
-                )
-                MonitorDetail(name = name, status = singleStatus)
-            }
-        }.sortedBy { monitorStatusPriority(it.status) }
-    }
-
-    private fun parseGroupStatuses(monitorObject: JsonObject): List<MonitorGroupStatus> {
-        val fromStateGroups = monitorObject["state"]
-            ?.asJsonObjectOrNull()
-            ?.get("groups")
-            ?.asJsonObjectOrNull()
-            ?.entries
-            ?.map { (groupName, stateElement) ->
-                val stateObject = stateElement.asJsonObjectOrNull()
-                val readableName = stateObject?.get("name")?.asStringOrNull() ?: groupName
-                val status = MonitorStatus.fromRaw(
-                    stateObject?.get("status")?.asStringOrNull()
-                        ?: stateObject?.get("overall_state")?.asStringOrNull()
-                )
-                MonitorGroupStatus(readableName, status)
-            }
-            .orEmpty()
-
-        if (fromStateGroups.isNotEmpty()) return fromStateGroups
-
-        return monitorObject["group_states"]
-            ?.asJsonArrayOrNull()
-            ?.mapIndexedNotNull { index, groupElement ->
-                val groupObject = groupElement.asJsonObjectOrNull() ?: return@mapIndexedNotNull null
-                val readableName = groupObject["name"]?.asStringOrNull()
-                    ?: groupObject["group"]?.asStringOrNull()
-                    ?: "Group ${index + 1}"
-                val status = MonitorStatus.fromRaw(
-                    groupObject["status"]?.asStringOrNull()
-                        ?: groupObject["overall_state"]?.asStringOrNull()
-                        ?: groupObject["state"]?.asStringOrNull()
-                )
-                MonitorGroupStatus(readableName, status)
-            }
-            .orEmpty()
-    }
-
-    private fun JsonElement?.asJsonObjectOrNull(): JsonObject? = this as? JsonObject
-    private fun JsonElement?.asJsonArrayOrNull(): JsonArray? = this as? JsonArray
-    private fun JsonElement?.asStringOrNull(): String? = this?.jsonPrimitive?.contentOrNull
 }

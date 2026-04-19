@@ -38,8 +38,10 @@ class DatadogModelsTest {
     @Test
     fun `isMultiAlert true when only group statuses exist`() {
         val detail = MonitorDetail(
+            id = 1L,
             name = "multi",
             status = MonitorStatus.ALERT,
+            isMultiMonitor = true,
             groupStatuses = listOf(
                 MonitorGroupStatus("group-a", MonitorStatus.ALERT)
             )
@@ -51,6 +53,7 @@ class DatadogModelsTest {
     @Test
     fun `resolvedStatusCounts derives counts from group statuses when status counts are missing`() {
         val detail = MonitorDetail(
+            id = 1L,
             name = "multi",
             status = MonitorStatus.ALERT,
             groupStatuses = listOf(
@@ -65,5 +68,41 @@ class DatadogModelsTest {
         assertEquals(1, detail.resolvedStatusCounts?.warn)
         assertEquals(1, detail.resolvedStatusCounts?.ok)
         assertEquals(1, detail.resolvedStatusCounts?.noData)
+    }
+
+    @Test
+    fun `toMonitorDetail maps search monitor to simple detail`() {
+        val detail = Monitor(id = 42L, name = "db", status = "Alert").toMonitorDetail()
+
+        assertEquals(42L, detail.id)
+        assertEquals("db", detail.name)
+        assertEquals(MonitorStatus.ALERT, detail.status)
+        assertEquals(false, detail.isMultiMonitor)
+    }
+
+    @Test
+    fun `monitor detail response maps multi and group statuses`() {
+        val response = MonitorDetailResponse(
+            id = 7L,
+            name = "multi monitor",
+            overallState = "Warn",
+            multi = true,
+            state = MonitorState(
+                groups = mapOf(
+                    "env:prod" to MonitorStateGroup(status = "Alert"),
+                    "env:stg" to MonitorStateGroup(status = "OK")
+                )
+            )
+        )
+
+        val detail = response.toMonitorDetail(fallbackStatus = MonitorStatus.NO_DATA)
+
+        assertEquals(7L, detail.id)
+        assertEquals("multi monitor", detail.name)
+        assertEquals(MonitorStatus.WARN, detail.status)
+        assertEquals(true, detail.isMultiMonitor)
+        assertEquals(2, detail.groupStatuses.size)
+        assertEquals(MonitorStatus.ALERT, detail.groupStatuses[0].status)
+        assertEquals(MonitorStatus.OK, detail.groupStatuses[1].status)
     }
 }

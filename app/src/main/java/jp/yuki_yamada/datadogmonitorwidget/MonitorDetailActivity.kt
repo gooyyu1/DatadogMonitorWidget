@@ -40,12 +40,22 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.state.PreferencesGlanceStateDefinition
+import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import jp.yuki_yamada.datadogmonitorwidget.ui.theme.DatadogMonitorWidgetTheme
 import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import retrofit2.Retrofit
 
 class MonitorDetailActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -127,14 +137,38 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
     var monitors by remember { mutableStateOf<List<MonitorDetail>>(emptyList()) }
 
     LaunchedEffect(appWidgetId) {
-        runCatching {
-            val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
-            val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
-            val monitorDetailsJson = prefs[MonitorWidget.MONITOR_DETAILS_JSON] ?: "[]"
+        val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
+        val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
+        val monitorDetailsJson = prefs[MonitorWidget.MONITOR_DETAILS_JSON] ?: "[]"
+        val parsed = runCatching {
             json.decodeFromString<List<MonitorDetail>>(monitorDetailsJson)
-        }.onSuccess { parsed ->
-            monitors = parsed.sortedBy { monitorStatusPriority(it.status) }
+        }.getOrElse {
+            runCatching {
+                json.decodeFromString<List<Monitor>>(monitorDetailsJson).map { it.toMonitorDetail() }
+            }.getOrDefault(emptyList())
         }
+        monitors = parsed.sortedBy { monitorStatusPriority(it.status) }
+
+        val apiKey = prefs[stringPreferencesKey("api_key")] ?: ""
+        val appKey = prefs[stringPreferencesKey("app_key")] ?: ""
+        val siteUrl = prefs[stringPreferencesKey("site_url")] ?: "https://api.datadoghq.com/"
+        if (apiKey.isBlank() || appKey.isBlank() || monitors.none { it.id > 0 }) return@LaunchedEffect
+
+        val service = createDatadogApiService(json, siteUrl)
+        val refreshed = coroutineScope {
+            monitors.map { monitor ->
+                async(Dispatchers.IO) {
+                    fetchMonitorDetailOrFallback(
+                        service = service,
+                        monitor = monitor,
+                        apiKey = apiKey,
+                        appKey = appKey,
+                        json = json
+                    )
+                }
+            }.awaitAll()
+        }
+        monitors = refreshed.sortedBy { monitorStatusPriority(it.status) }
     }
 
     Column(
@@ -156,7 +190,8 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 monitors.forEach { monitor ->
                     val statusCounts = monitor.resolvedStatusCounts
-                    val rowModifier = if (monitor.isMultiAlert) {
+                    val hasBreakdown = monitor.groupStatuses.isNotEmpty()
+                    val rowModifier = if (hasBreakdown) {
                         Modifier
                             .fillMaxWidth()
                             .clickable {
@@ -254,3 +289,32 @@ private fun StatusCountBadge(text: String, status: MonitorStatus) {
 
 private const val EXTRA_MONITOR_NAME = "monitor_name"
 private const val EXTRA_GROUP_STATUSES_JSON = "group_statuses_json"
+
+private fun createDatadogApiService(json: Json, siteUrl: String): DatadogApiService =
+    Retrofit.Builder()
+        .baseUrl(siteUrl)
+        .client(OkHttpClient.Builder().build())
+        .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+        .build()
+        .create(DatadogApiService::class.java)
+
+private suspend fun fetchMonitorDetailOrFallback(
+    service: DatadogApiService,
+    monitor: MonitorDetail,
+    apiKey: String,
+    appKey: String,
+    json: Json
+): MonitorDetail {
+    if (monitor.id <= 0) return monitor
+
+    return runCatching {
+        val response = service.getMonitor(monitor.id, apiKey, appKey)
+        val responseBody = response.body()?.string()
+        if (!response.isSuccessful || responseBody.isNullOrBlank()) {
+            monitor
+        } else {
+            json.decodeFromString<MonitorDetailResponse>(responseBody)
+                .toMonitorDetail(fallbackStatus = monitor.status)
+        }
+    }.getOrDefault(monitor)
+}
