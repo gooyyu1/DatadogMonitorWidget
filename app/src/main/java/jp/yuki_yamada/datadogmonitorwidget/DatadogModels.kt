@@ -64,5 +64,15 @@ data class MonitorDetail(
     val groupStatuses: List<MonitorGroupStatus> = emptyList()
 ) {
     val isMultiAlert: Boolean
-        get() = statusCounts != null
+        get() = statusCounts != null || groupStatuses.isNotEmpty()
+
+    val resolvedStatusCounts: StatusCounts?
+        get() = statusCounts ?: groupStatuses.takeIf { it.isNotEmpty() }?.let { groups ->
+            StatusCounts(
+                ok = groups.count { it.status == MonitorStatus.OK },
+                warn = groups.count { it.status == MonitorStatus.WARN },
+                alert = groups.count { it.status == MonitorStatus.ALERT },
+                noData = groups.count { it.status == MonitorStatus.NO_DATA }
+            )
+        }
 }
