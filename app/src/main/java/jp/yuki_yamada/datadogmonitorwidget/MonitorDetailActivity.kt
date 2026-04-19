@@ -152,7 +152,8 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
         val apiKey = prefs[stringPreferencesKey("api_key")] ?: ""
         val appKey = prefs[stringPreferencesKey("app_key")] ?: ""
         val siteUrl = prefs[stringPreferencesKey("site_url")] ?: "https://api.datadoghq.com/"
-        if (apiKey.isBlank() || appKey.isBlank() || monitors.none { it.id > 0 }) return@LaunchedEffect
+        val hasValidMonitorIds = monitors.any { it.id > 0 }
+        if (apiKey.isBlank() || appKey.isBlank() || !hasValidMonitorIds) return@LaunchedEffect
 
         val service = createDatadogApiService(json, siteUrl)
         val refreshed = coroutineScope {
