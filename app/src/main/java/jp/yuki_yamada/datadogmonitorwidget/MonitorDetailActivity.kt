@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -95,7 +96,7 @@ class MonitorBreakdownActivity : ComponentActivity() {
                             .padding(16.dp)
                     ) {
                         Text(
-                            text = if (monitorName.isBlank()) "Monitor breakdown" else monitorName,
+                            text = if (monitorName.isBlank()) stringResource(R.string.monitor_breakdown_title) else monitorName,
                             style = MaterialTheme.typography.headlineSmall
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -142,7 +143,7 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
             .verticalScroll(rememberScrollState())
     ) {
         Text(
-            text = "Monitor details",
+            text = stringResource(R.string.monitor_details_title),
             style = MaterialTheme.typography.headlineSmall
         )
         Spacer(modifier = Modifier.height(12.dp))
@@ -150,7 +151,7 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
         Spacer(modifier = Modifier.height(16.dp))
 
         if (monitors.isEmpty()) {
-            Text("No monitor data")
+            Text(stringResource(R.string.no_monitor_data))
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 monitors.forEach { monitor ->
@@ -206,7 +207,7 @@ private fun OpenDatadogButton() {
             context.startActivity(datadogIntent)
         }
     ) {
-        Text("Open Datadog app")
+        Text(stringResource(R.string.open_datadog_app))
     }
 }
 

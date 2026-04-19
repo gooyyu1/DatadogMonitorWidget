@@ -8,9 +8,16 @@ class DatadogModelsTest {
     @Test
     fun `fromRaw maps monitor statuses`() {
         assertEquals(MonitorStatus.ALERT, MonitorStatus.fromRaw("Alert"))
+        assertEquals(MonitorStatus.ALERT, MonitorStatus.fromRaw("ALERTING"))
         assertEquals(MonitorStatus.WARN, MonitorStatus.fromRaw("Warn"))
+        assertEquals(MonitorStatus.WARN, MonitorStatus.fromRaw("WARNING"))
         assertEquals(MonitorStatus.OK, MonitorStatus.fromRaw("OK"))
         assertEquals(MonitorStatus.NO_DATA, MonitorStatus.fromRaw("No Data"))
+        assertEquals(MonitorStatus.NO_DATA, MonitorStatus.fromRaw("NO_DATA"))
+        assertEquals(MonitorStatus.NO_DATA, MonitorStatus.fromRaw("NODATA"))
+        assertEquals(MonitorStatus.NO_DATA, MonitorStatus.fromRaw("UNKNOWN"))
+        assertEquals(MonitorStatus.NO_DATA, MonitorStatus.fromRaw(null))
+        assertEquals(MonitorStatus.NO_DATA, MonitorStatus.fromRaw("something else"))
     }
 
     @Test
