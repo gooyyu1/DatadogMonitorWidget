@@ -19,6 +19,7 @@ interface DatadogApiService {
     suspend fun getMonitor(
         @Path("monitor_id") monitorId: Long,
         @Header("DD-API-KEY") apiKey: String,
-        @Header("DD-APPLICATION-KEY") appKey: String
+        @Header("DD-APPLICATION-KEY") appKey: String,
+        @Query("group_states") groupStates: String = "all"
     ): Response<ResponseBody>
 }
