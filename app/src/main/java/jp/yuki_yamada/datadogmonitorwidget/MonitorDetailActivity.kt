@@ -4,6 +4,7 @@ import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -286,6 +287,7 @@ private fun StatusCountBadge(text: String, status: MonitorStatus) {
 
 private const val EXTRA_MONITOR_NAME = "monitor_name"
 private const val EXTRA_GROUP_STATUSES_JSON = "group_statuses_json"
+private const val MONITOR_DETAIL_TAG = "MonitorDetailActivity"
 
 private suspend fun fetchMonitorDetailOrFallback(
     service: MonitorsApi,
@@ -293,7 +295,7 @@ private suspend fun fetchMonitorDetailOrFallback(
 ): MonitorDetailFetchResult {
     if (monitor.id <= 0) return MonitorDetailFetchResult(monitorDetail = monitor)
 
-    return runCatching {
+    return try {
         val response = service.getMonitor(
             monitor.id,
             MonitorsApi.GetMonitorOptionalParameters().groupStates("all")
@@ -301,13 +303,13 @@ private suspend fun fetchMonitorDetailOrFallback(
         MonitorDetailFetchResult(
             monitorDetail = response.toMonitorDetail(fallbackStatus = monitor.status)
         )
-    }.recover {
-        if (it is ApiException) {
-            MonitorDetailFetchResult(monitorDetail = monitor)
-        } else {
-            throw it
-        }
-    }.getOrDefault(MonitorDetailFetchResult(monitorDetail = monitor))
+    } catch (_: ApiException) {
+        Log.w(MONITOR_DETAIL_TAG, "Failed to fetch monitor detail from Datadog API for monitorId=${monitor.id}")
+        MonitorDetailFetchResult(monitorDetail = monitor)
+    } catch (e: Exception) {
+        Log.w(MONITOR_DETAIL_TAG, "Unexpected error while fetching monitor detail for monitorId=${monitor.id}", e)
+        MonitorDetailFetchResult(monitorDetail = monitor)
+    }
 }
 
 private data class MonitorDetailFetchResult(

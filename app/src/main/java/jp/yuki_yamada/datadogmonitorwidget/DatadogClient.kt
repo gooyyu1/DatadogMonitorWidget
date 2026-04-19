@@ -5,9 +5,12 @@ import com.datadog.api.client.v1.api.MonitorsApi
 import com.datadog.api.client.v1.model.Monitor as DatadogMonitor
 import com.datadog.api.client.v1.model.MonitorSearchResult
 
-private const val INVALID_MONITOR_ID = -1L
+private const val FALLBACK_MONITOR_ID = -1L
 
 fun createMonitorsApi(apiKey: String, appKey: String, siteUrl: String): MonitorsApi {
+    require(apiKey.isNotBlank()) { "Datadog API key must not be blank." }
+    require(appKey.isNotBlank()) { "Datadog application key must not be blank." }
+
     val apiClient = ApiClient()
     apiClient.setBasePath(siteUrl.trimEnd('/'))
     apiClient.configureApiKeys(
@@ -41,7 +44,7 @@ fun DatadogMonitor.toMonitorDetail(fallbackStatus: MonitorStatus): MonitorDetail
         .sortedBy { monitorStatusPriority(it.status) }
 
     return MonitorDetail(
-        id = id ?: INVALID_MONITOR_ID,
+        id = id ?: FALLBACK_MONITOR_ID,
         name = name.orEmpty(),
         status = overallState?.toString()?.let(MonitorStatus::fromRaw) ?: fallbackStatus,
         isMultiMonitor = multi ?: false,

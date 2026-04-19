@@ -1,14 +1,13 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
+import com.datadog.api.client.ApiClient
 import com.datadog.api.client.v1.model.Monitor as DatadogMonitor
-import com.datadog.api.client.v1.model.MonitorOverallStates
 import com.datadog.api.client.v1.model.MonitorSearchResult
-import com.datadog.api.client.v1.model.MonitorState
-import com.datadog.api.client.v1.model.MonitorStateGroup
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DatadogModelsTest {
+    private val mapper = ApiClient().json.mapper
 
     @Test
     fun `fromRaw maps monitor statuses`() {
@@ -87,10 +86,10 @@ class DatadogModelsTest {
 
     @Test
     fun `monitor search result maps to app monitor`() {
-        val result = MonitorSearchResult()
-        setPrivateField(result, "id", 99L)
-        setPrivateField(result, "name", "search monitor")
-        setPrivateField(result, "status", MonitorOverallStates.ALERT)
+        val result = mapper.readValue(
+            """{"id":99,"name":"search monitor","status":"Alert"}""",
+            MonitorSearchResult::class.java
+        )
 
         val monitor = result.toMonitorOrNull()
 
@@ -101,25 +100,24 @@ class DatadogModelsTest {
 
     @Test
     fun `datadog monitor maps multi and group statuses`() {
-        val prodGroup = MonitorStateGroup()
-        setPrivateField(prodGroup, "status", MonitorOverallStates.ALERT)
-        val stgGroup = MonitorStateGroup()
-        setPrivateField(stgGroup, "status", MonitorOverallStates.OK)
-
-        val response = DatadogMonitor()
-        setPrivateField(response, "id", 7L)
-        setPrivateField(response, "name", "multi monitor")
-        setPrivateField(response, "overallState", MonitorOverallStates.WARN)
-        setPrivateField(response, "multi", true)
-        setPrivateField(
-            response,
-            "state",
-            MonitorState().groups(
-                linkedMapOf(
-                    "env:prod" to prodGroup,
-                    "env:stg" to stgGroup
-                )
-            )
+        val response = mapper.readValue(
+            """
+            {
+              "id": 7,
+              "name": "multi monitor",
+              "query": "avg(last_5m):avg:system.cpu.user{*} > 90",
+              "type": "query alert",
+              "overall_state": "Warn",
+              "multi": true,
+              "state": {
+                "groups": {
+                  "env:prod": { "status": "Alert" },
+                  "env:stg": { "status": "OK" }
+                }
+              }
+            }
+            """.trimIndent(),
+            DatadogMonitor::class.java
         )
 
         val detail = response.toMonitorDetail(fallbackStatus = MonitorStatus.NO_DATA)
@@ -131,11 +129,5 @@ class DatadogModelsTest {
         assertEquals(2, detail.groupStatuses.size)
         assertEquals(MonitorStatus.ALERT, detail.groupStatuses[0].status)
         assertEquals(MonitorStatus.OK, detail.groupStatuses[1].status)
-    }
-
-    private fun setPrivateField(target: Any, fieldName: String, value: Any?) {
-        val field = target.javaClass.getDeclaredField(fieldName)
-        field.isAccessible = true
-        field.set(target, value)
     }
 }
