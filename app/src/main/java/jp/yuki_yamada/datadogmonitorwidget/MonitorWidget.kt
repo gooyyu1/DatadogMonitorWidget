@@ -1,12 +1,13 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.GlanceId
@@ -22,9 +23,7 @@ import androidx.glance.currentState
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
 import androidx.glance.layout.Column
-import androidx.glance.layout.Spacer
 import androidx.glance.layout.fillMaxSize
-import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.state.GlanceStateDefinition
 import androidx.glance.state.PreferencesGlanceStateDefinition
@@ -49,6 +48,8 @@ class MonitorWidget : GlanceAppWidget() {
         val INTERVAL_MIN = stringPreferencesKey("interval")
         val LAST_ERROR = stringPreferencesKey("last_error")
         val LAST_SUCCESS_TIME = stringPreferencesKey("last_success_time")
+        val APP_WIDGET_ID = intPreferencesKey("app_widget_id")
+        val MONITOR_DETAILS_JSON = stringPreferencesKey("monitor_details_json")
     }
 
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
@@ -77,15 +78,17 @@ class MonitorWidget : GlanceAppWidget() {
                 SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(lastUpdate))
             } else ""
 
-            val datadogIntent = context.packageManager.getLaunchIntentForPackage("com.datadog.app")
-                ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://app.datadoghq.com/"))
+            val appWidgetId = prefs[APP_WIDGET_ID] ?: AppWidgetManager.INVALID_APPWIDGET_ID
+            val detailsIntent = Intent(context, MonitorDetailActivity::class.java).apply {
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+            }
 
             Box(
                 modifier = GlanceModifier
                     .fillMaxSize()
                     .background(Color.Transparent)
                     .padding(4.dp)
-                    .clickable(actionStartActivity(datadogIntent)),
+                    .clickable(actionStartActivity(detailsIntent)),
                 contentAlignment = Alignment.Center
             ) {
                 Column(

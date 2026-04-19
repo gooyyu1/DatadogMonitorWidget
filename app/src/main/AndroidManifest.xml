@@ -42,6 +42,16 @@
                 <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".MonitorDetailActivity"
+            android:exported="true"
+            android:label="Monitor details"
+            android:theme="@style/Theme.DatadogMonitorWidget" />
+        <activity
+            android:name=".MonitorBreakdownActivity"
+            android:exported="true"
+            android:label="Monitor breakdown"
+            android:theme="@style/Theme.DatadogMonitorWidget" />
 
         <receiver
             android:name=".MonitorWidgetReceiver"

@@ -1,7 +1,6 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
 import android.content.Context
-import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
@@ -15,6 +14,12 @@ import androidx.work.WorkerParameters
 import androidx.work.ListenableWorker
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.encodeToString
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -44,7 +49,7 @@ class MonitorWorker(
 
         if (apiKey.isEmpty() || appKey.isEmpty()) {
             saveError(appWidgetId, "API Key or App Key is missing")
-            updateWidgetUI(appWidgetId, "NA", MonitorStatus.ALERT)
+            updateWidgetUI(appWidgetId, "NA", MonitorStatus.ALERT, "[]")
             return ListenableWorker.Result.failure()
         }
 
@@ -79,10 +84,13 @@ class MonitorWorker(
 
             val monitorResponse = json.decodeFromString<MonitorSearchResponse>(responseBodyString)
             val monitors = monitorResponse.monitors
+            val monitorDetails = runCatching {
+                parseMonitorDetails(json, responseBodyString)
+            }.getOrDefault(emptyList())
             val total = monitors.size
-            val okCount = monitors.count { it.status == "OK" }
-            val alertCount = monitors.count { it.status == "Alert" }
-            val warnCount = monitors.count { it.status == "Warn" }
+            val okCount = monitors.count { MonitorStatus.fromRaw(it.status) == MonitorStatus.OK }
+            val alertCount = monitors.count { MonitorStatus.fromRaw(it.status) == MonitorStatus.ALERT }
+            val warnCount = monitors.count { MonitorStatus.fromRaw(it.status) == MonitorStatus.WARN }
 
             val statusText = if (total == 0) "0/0" else "$okCount/$total"
             val monitorStatus = when {
@@ -92,7 +100,7 @@ class MonitorWorker(
                 else -> MonitorStatus.OK
             }
 
-            updateWidgetUI(appWidgetId, statusText, monitorStatus)
+            updateWidgetUI(appWidgetId, statusText, monitorStatus, json.encodeToString(monitorDetails))
             
             val currentTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
             saveSuccess(appWidgetId, currentTime)
@@ -102,7 +110,7 @@ class MonitorWorker(
             return ListenableWorker.Result.success()
         } catch (e: Exception) {
             saveError(appWidgetId, e.message ?: "Unknown error")
-            updateWidgetUI(appWidgetId, "NA", MonitorStatus.ALERT)
+            updateWidgetUI(appWidgetId, "NA", MonitorStatus.ALERT, "[]")
             val intervalMins = interval.toLongOrNull() ?: 5L
             scheduleNextWork(appWidgetId, intervalMins)
             return ListenableWorker.Result.failure()
@@ -122,13 +130,20 @@ class MonitorWorker(
         )
     }
 
-    private suspend fun updateWidgetUI(appWidgetId: Int, text: String, status: MonitorStatus) {
+    private suspend fun updateWidgetUI(
+        appWidgetId: Int,
+        text: String,
+        status: MonitorStatus,
+        monitorDetailsJson: String
+    ) {
         val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
         updateAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId) { prefs ->
             prefs.toMutablePreferences().apply {
                 this[MonitorWidget.STATUS_TEXT] = text
                 this[MonitorWidget.STATUS_COLOR] = status.name
                 this[MonitorWidget.LAST_UPDATE_MILLIS] = System.currentTimeMillis()
+                this[MonitorWidget.APP_WIDGET_ID] = appWidgetId
+                this[MonitorWidget.MONITOR_DETAILS_JSON] = monitorDetailsJson
             }
         }
         MonitorWidget().update(context, glanceId)
@@ -152,4 +167,83 @@ class MonitorWorker(
             }
         }
     }
+
+    private fun parseMonitorDetails(json: Json, responseBodyString: String): List<MonitorDetail> {
+        val root = json.parseToJsonElement(responseBodyString).asJsonObjectOrNull() ?: return emptyList()
+        val monitorArray = root["monitors"]?.asJsonArrayOrNull() ?: return emptyList()
+
+        return monitorArray.mapNotNull { monitorElement ->
+            val monitorObject = monitorElement.asJsonObjectOrNull() ?: return@mapNotNull null
+            val name = monitorObject["name"]?.asStringOrNull()?.takeIf { it.isNotBlank() } ?: "Unnamed monitor"
+            val groupStatuses = parseGroupStatuses(monitorObject)
+                .sortedBy { monitorStatusPriority(it.status) }
+
+            if (groupStatuses.isNotEmpty()) {
+                val statusCounts = StatusCounts(
+                    ok = groupStatuses.count { it.status == MonitorStatus.OK },
+                    warn = groupStatuses.count { it.status == MonitorStatus.WARN },
+                    alert = groupStatuses.count { it.status == MonitorStatus.ALERT },
+                    noData = groupStatuses.count { it.status == MonitorStatus.NO_DATA }
+                )
+                val summaryStatus = when {
+                    statusCounts.alert > 0 -> MonitorStatus.ALERT
+                    statusCounts.warn > 0 -> MonitorStatus.WARN
+                    statusCounts.ok > 0 -> MonitorStatus.OK
+                    else -> MonitorStatus.NO_DATA
+                }
+                MonitorDetail(
+                    name = name,
+                    status = summaryStatus,
+                    statusCounts = statusCounts,
+                    groupStatuses = groupStatuses
+                )
+            } else {
+                val singleStatus = MonitorStatus.fromRaw(
+                    monitorObject["status"]?.asStringOrNull()
+                        ?: monitorObject["overall_state"]?.asStringOrNull()
+                )
+                MonitorDetail(name = name, status = singleStatus)
+            }
+        }.sortedBy { monitorStatusPriority(it.status) }
+    }
+
+    private fun parseGroupStatuses(monitorObject: JsonObject): List<MonitorGroupStatus> {
+        val fromStateGroups = monitorObject["state"]
+            ?.asJsonObjectOrNull()
+            ?.get("groups")
+            ?.asJsonObjectOrNull()
+            ?.entries
+            ?.map { (groupName, stateElement) ->
+                val stateObject = stateElement.asJsonObjectOrNull()
+                val readableName = stateObject?.get("name")?.asStringOrNull() ?: groupName
+                val status = MonitorStatus.fromRaw(
+                    stateObject?.get("status")?.asStringOrNull()
+                        ?: stateObject?.get("overall_state")?.asStringOrNull()
+                )
+                MonitorGroupStatus(readableName, status)
+            }
+            .orEmpty()
+
+        if (fromStateGroups.isNotEmpty()) return fromStateGroups
+
+        return monitorObject["group_states"]
+            ?.asJsonArrayOrNull()
+            ?.mapIndexedNotNull { index, groupElement ->
+                val groupObject = groupElement.asJsonObjectOrNull() ?: return@mapIndexedNotNull null
+                val readableName = groupObject["name"]?.asStringOrNull()
+                    ?: groupObject["group"]?.asStringOrNull()
+                    ?: "Group ${index + 1}"
+                val status = MonitorStatus.fromRaw(
+                    groupObject["status"]?.asStringOrNull()
+                        ?: groupObject["overall_state"]?.asStringOrNull()
+                        ?: groupObject["state"]?.asStringOrNull()
+                )
+                MonitorGroupStatus(readableName, status)
+            }
+            .orEmpty()
+    }
+
+    private fun JsonElement?.asJsonObjectOrNull(): JsonObject? = this as? JsonObject
+    private fun JsonElement?.asJsonArrayOrNull(): JsonArray? = this as? JsonArray
+    private fun JsonElement?.asStringOrNull(): String? = this?.jsonPrimitive?.contentOrNull
 }
