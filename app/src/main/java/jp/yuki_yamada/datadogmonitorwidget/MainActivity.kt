@@ -1,9 +1,7 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
-import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
-import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -31,6 +29,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import jp.yuki_yamada.datadogmonitorwidget.ui.theme.DatadogMonitorWidgetTheme
 
+/**
+ * アプリのメインエントリポイントとなるアクティビティ。
+ * ウィジェットの追加方法の案内と、ホーム画面へのピン留め機能を提供します。
+ */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,12 +74,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * システムの機能を使用して、ホーム画面にウィジェットを追加するボタン。
+ */
 @Composable
 fun AddWidgetButton() {
     val context = LocalContext.current
     val appWidgetManager = AppWidgetManager.getInstance(context)
     val myProvider = ComponentName(context, MonitorWidgetReceiver::class.java)
 
+    // Android 8.0 (API 26) 以上でサポートされているピン留め機能
     if (appWidgetManager.isRequestPinAppWidgetSupported) {
         Button(
             onClick = {

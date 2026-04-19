@@ -7,9 +7,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.longPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.action.clickable
@@ -35,39 +32,31 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * ホーム画面に表示されるウィジェットの UI 定義。
+ * Jetpack Glance を使用して、リモートビューとして構成されます。
+ */
 class MonitorWidget : GlanceAppWidget() {
-
-    companion object {
-        val STATUS_TEXT = stringPreferencesKey("status_text")
-        val STATUS_COLOR = stringPreferencesKey("status_color")
-        val LAST_UPDATE_MILLIS = longPreferencesKey("last_update_millis")
-        val API_KEY = stringPreferencesKey("api_key")
-        val APP_KEY = stringPreferencesKey("app_key")
-        val QUERY = stringPreferencesKey("query")
-        val SITE_URL = stringPreferencesKey("site_url")
-        val INTERVAL_MIN = stringPreferencesKey("interval")
-        val LAST_ERROR = stringPreferencesKey("last_error")
-        val LAST_SUCCESS_TIME = stringPreferencesKey("last_success_time")
-        val APP_WIDGET_ID = intPreferencesKey("app_widget_id")
-        val MONITOR_DETAILS_JSON = stringPreferencesKey("monitor_details_json")
-    }
 
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
 
+    /**
+     * ウィジェットの表示内容を構築します。
+     * DataStore の値が更新されるたびに再呼び出しされます。
+     */
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             val prefs = currentState<Preferences>()
-            val statusText = prefs[STATUS_TEXT] ?: "NA"
-            val statusName = prefs[STATUS_COLOR] ?: MonitorStatus.ALERT.name
-            val monitorStatus = try {
-                MonitorStatus.valueOf(statusName)
-            } catch (e: Exception) {
-                MonitorStatus.ALERT
-            }
-            val lastUpdate = prefs[LAST_UPDATE_MILLIS] ?: 0L
+            val state = MonitorWidgetState(prefs)
+            
+            val statusText = state.statusText
+            val monitorStatus = state.monitorStatus
+            val lastUpdate = state.lastUpdateMillis
 
+            // ステータスに応じた背景色の決定。
+            // ユーザーに安心感を与えるため、MUTED も OK と同じ緑色で表示します。
             val bgColor = when (monitorStatus) {
-                MonitorStatus.OK -> Color(0xFF4CAF50)
+                MonitorStatus.OK, MonitorStatus.MUTED -> Color(0xFF4CAF50)
                 MonitorStatus.WARN -> Color(0xFFFFA000)
                 MonitorStatus.ALERT -> Color(0xFFF44336)
                 MonitorStatus.NO_DATA -> Color(0xFF9E9E9E)
@@ -78,7 +67,8 @@ class MonitorWidget : GlanceAppWidget() {
                 SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(lastUpdate))
             } else ""
 
-            val appWidgetId = prefs[APP_WIDGET_ID] ?: AppWidgetManager.INVALID_APPWIDGET_ID
+            val appWidgetId = state.appWidgetId
+            // ウィジェットをタップした際に開くアクティビティ（詳細画面）の定義
             val detailsIntent = Intent(context, MonitorDetailActivity::class.java).apply {
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
             }
@@ -100,6 +90,7 @@ class MonitorWidget : GlanceAppWidget() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 「成功数/総数」などのメインテキスト
                     Text(
                         text = statusText,
                         style = TextStyle(
@@ -109,6 +100,7 @@ class MonitorWidget : GlanceAppWidget() {
                         )
                     )
                     
+                    // 最終更新時刻を小さく表示
                     if (lastUpdateText.isNotEmpty()) {
                         Text(
                             text = lastUpdateText,
@@ -124,6 +116,10 @@ class MonitorWidget : GlanceAppWidget() {
     }
 }
 
+/**
+ * ウィジェットのライフサイクルイベント（追加、削除、更新）を受け取るレシーバー。
+ * AndroidManifest.xml に登録されます。
+ */
 class MonitorWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = MonitorWidget()
 }

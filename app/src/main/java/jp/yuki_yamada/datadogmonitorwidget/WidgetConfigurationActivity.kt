@@ -110,13 +110,15 @@ fun ConfigurationScreen(
     LaunchedEffect(appWidgetId) {
         val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
         val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
-        apiKey = prefs[stringPreferencesKey("api_key")] ?: ""
-        appKey = prefs[stringPreferencesKey("app_key")] ?: ""
-        query = prefs[stringPreferencesKey("query")] ?: ""
-        interval = prefs[stringPreferencesKey("interval")] ?: "5"
-        siteUrl = prefs[stringPreferencesKey("site_url")] ?: "https://api.datadoghq.com/"
-        lastError = prefs[stringPreferencesKey("last_error")] ?: ""
-        lastSuccessTime = prefs[stringPreferencesKey("last_success_time")] ?: ""
+        val state = MonitorWidgetState(prefs)
+        
+        apiKey = state.apiKey
+        appKey = state.appKey
+        query = state.query
+        interval = state.intervalMin
+        siteUrl = state.siteUrl
+        lastError = state.lastError
+        lastSuccessTime = state.lastSuccessTime
     }
 
     Column(
@@ -188,12 +190,13 @@ fun ConfigurationScreen(
                     val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
                     updateAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId) { prefs ->
                         prefs.toMutablePreferences().apply {
-                            this[stringPreferencesKey("api_key")] = apiKey
-                            this[stringPreferencesKey("app_key")] = appKey
-                            this[stringPreferencesKey("query")] = query
-                            this[stringPreferencesKey("interval")] = interval
-                            this[stringPreferencesKey("site_url")] = siteUrl
-                            this[stringPreferencesKey("app_url")] = appUrl
+                            val mutableState = MutableMonitorWidgetState(this)
+                            mutableState.apiKey = apiKey
+                            mutableState.appKey = appKey
+                            mutableState.query = query
+                            mutableState.intervalMin = interval
+                            mutableState.siteUrl = siteUrl
+                            mutableState.appUrl = appUrl
                         }
                     }
                     MonitorWidget().update(context, glanceId)

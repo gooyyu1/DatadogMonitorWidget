@@ -1,17 +1,25 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
+import android.appwidget.AppWidgetManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsets
@@ -22,17 +30,21 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -48,12 +60,18 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.state.PreferencesGlanceStateDefinition
 import jp.yuki_yamada.datadogmonitorwidget.ui.MonitorRow
+import jp.yuki_yamada.datadogmonitorwidget.ui.MuteDurationDialog
 import jp.yuki_yamada.datadogmonitorwidget.ui.StatusCountBadge
 import jp.yuki_yamada.datadogmonitorwidget.ui.theme.DatadogMonitorWidgetTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
+/**
+ * マルチモニター内の個々のグループ（内訳）を表示するアクティビティ。
+ * モニター詳細画面から特定のマルチモニターをタップした際に開かれます。
+ */
 class MonitorBreakdownActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,20 +83,13 @@ class MonitorBreakdownActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             DatadogMonitorWidgetTheme {
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    contentWindowInsets = WindowInsets.safeDrawing
-                ) { innerPadding ->
-                    MonitorBreakdownScreen(
-                        appWidgetId = appWidgetId,
-                        monitorId = monitorId,
-                        monitorName = monitorName,
-                        groupStatusesJson = groupStatusesJson,
-                        modifier = Modifier
-                            .padding(innerPadding)
-                            .fillMaxSize()
-                    )
-                }
+                MonitorBreakdownScreen(
+                    appWidgetId = appWidgetId,
+                    monitorId = monitorId,
+                    monitorName = monitorName,
+                    groupStatusesJson = groupStatusesJson,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
     }
@@ -91,6 +102,11 @@ class MonitorBreakdownActivity : ComponentActivity() {
     }
 }
 
+/**
+ * 内訳表示画面のメイン UI。
+ * ステータスごとにタブを分け、グループの一覧を表示します。
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MonitorBreakdownScreen(
     appWidgetId: Int,
@@ -100,17 +116,30 @@ private fun MonitorBreakdownScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val json = remember { Json { ignoreUnknownKeys = true } }
+    
+    // 表示するグループリストの状態管理
     var groups by rememberSaveable(stateSaver = monitorGroupStatusesSaver) {
         mutableStateOf(emptyList())
     }
     var isLoading by rememberSaveable { mutableStateOf(true) }
     var appUrl by remember { mutableStateOf("https://app.datadoghq.com/") }
+    var apiKey by remember { mutableStateOf("") }
+    var appKey by remember { mutableStateOf("") }
+    var siteUrl by remember { mutableStateOf("https://api.datadoghq.com/") }
 
+    // 選択（一括ミュート用）の状態管理
+    val selectedGroupNames = remember { mutableStateListOf<String>() }
+    val isSelectionMode = selectedGroupNames.isNotEmpty()
+    var showMuteDialog by remember { mutableStateOf(false) }
+
+    // 表示するタブ（ステータス）の順序定義
     val statusTabs = remember {
         listOf(
             MonitorStatus.ALERT,
             MonitorStatus.WARN,
+            MonitorStatus.MUTED,
             MonitorStatus.OK,
             MonitorStatus.NO_DATA
         )
@@ -118,12 +147,14 @@ private fun MonitorBreakdownScreen(
     var selectedTabIndex by rememberSaveable(groupStatusesJson) { mutableIntStateOf(0) }
     var hasDefaultTabBeenSet by rememberSaveable(groupStatusesJson) { mutableStateOf(false) }
 
+    // インテント経由で渡された JSON データをパースし、キー情報を読み込む
     LaunchedEffect(groupStatusesJson, appWidgetId) {
         val decodedGroups = withContext(Dispatchers.Default) {
             decodeMonitorGroupStatuses(json, groupStatusesJson)
         }
         groups = decodedGroups
 
+        // データが存在する最初のステータスタブを自動選択する
         if (!hasDefaultTabBeenSet && decodedGroups.isNotEmpty()) {
             val firstNonEmptyIndex = statusTabs.indexOfFirst { status ->
                 decodedGroups.any { it.status == status }
@@ -134,124 +165,220 @@ private fun MonitorBreakdownScreen(
             hasDefaultTabBeenSet = true
         }
 
-        // Fetch appUrl
         val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
         val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
-        appUrl = prefs[stringPreferencesKey("app_url")] ?: "https://app.datadoghq.com/"
+        val state = MonitorWidgetState(prefs)
+        
+        appUrl = state.appUrl
+        apiKey = state.apiKey
+        appKey = state.appKey
+        siteUrl = state.siteUrl
 
         isLoading = false
     }
 
-    Column(
-        modifier = modifier
-            .padding(top = 16.dp)
-            .fillMaxSize()
-    ) {
-        Text(
-            text = if (monitorName.isBlank()) stringResource(R.string.monitor_breakdown_title) else monitorName,
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
-        Spacer(modifier = Modifier.height(12.dp))
-
-        if (isLoading) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
-        } else {
-            val filteredGroups = groups.filter { it.status == statusTabs[selectedTabIndex] }
-
-            TabRow(
-                selectedTabIndex = selectedTabIndex,
-                containerColor = Color.Transparent,
-                divider = {},
-                indicator = { tabPositions ->
-                    if (selectedTabIndex < tabPositions.size) {
-                        TabRowDefaults.SecondaryIndicator(
-                            modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
-                            color = getStatusColor(statusTabs[selectedTabIndex])
+    Scaffold(
+        modifier = modifier,
+        contentWindowInsets = WindowInsets.safeDrawing,
+        bottomBar = {
+            // グループ選択中の操作バー
+            if (isSelectionMode) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    tonalElevation = 4.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "${selectedGroupNames.size} selected",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium
                         )
+                        TextButton(onClick = { showMuteDialog = true }) {
+                            Text("Mute")
+                        }
+                        TextButton(onClick = { selectedGroupNames.clear() }) {
+                            Text("Cancel")
+                        }
                     }
                 }
-            ) {
-                statusTabs.forEachIndexed { index, status ->
-                    val count = groups.count { it.status == status }
-                    val isSelected = selectedTabIndex == index
-                    Tab(
-                        selected = isSelected,
-                        onClick = { selectedTabIndex = index },
-                        modifier = Modifier.padding(vertical = 8.dp)
+            }
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .padding(top = 16.dp)
+                .fillMaxSize()
+        ) {
+            Text(
+                text = if (monitorName.isBlank()) stringResource(R.string.monitor_breakdown_title) else monitorName,
+                style = MaterialTheme.typography.headlineSmall,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            } else {
+                // データが存在するステータスのみタブとして表示する
+                val availableTabs = statusTabs.filter { status -> groups.any { it.status == status } }
+                val selectedStatus = statusTabs.getOrNull(selectedTabIndex) ?: MonitorStatus.OK
+                val selectedTabRowIndex = availableTabs.indexOf(selectedStatus).coerceAtLeast(0)
+                val filteredGroups = groups.filter { it.status == availableTabs.getOrNull(selectedTabRowIndex) }
+
+                if (availableTabs.isNotEmpty()) {
+                    TabRow(
+                        selectedTabIndex = selectedTabRowIndex,
+                        containerColor = Color.Transparent,
+                        divider = {},
+                        indicator = { tabPositions ->
+                            if (selectedTabRowIndex < tabPositions.size) {
+                                TabRowDefaults.SecondaryIndicator(
+                                    modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTabRowIndex]),
+                                    color = getStatusColor(availableTabs[selectedTabRowIndex])
+                                )
+                            }
+                        }
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .padding(bottom = 4.dp)
-                                .alpha(if (isSelected) 1f else 0.6f)
-                        ) {
-                            StatusCountBadge(
-                                text = "${status.name.replace('_', ' ')} $count",
-                                status = status
+                        availableTabs.forEach { status ->
+                            val count = groups.count { it.status == status }
+                            val isSelected = status == availableTabs.getOrNull(selectedTabRowIndex)
+                            Tab(
+                                selected = isSelected,
+                                onClick = { selectedTabIndex = statusTabs.indexOf(status) },
+                                modifier = Modifier.padding(vertical = 8.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(bottom = 4.dp)
+                                        .alpha(if (isSelected) 1f else 0.6f)
+                                ) {
+                                    StatusCountBadge(
+                                        text = "${status.name.replace('_', ' ')} $count",
+                                        status = status
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (filteredGroups.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = stringResource(R.string.no_monitor_data),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
+                    ) {
+                        items(filteredGroups) { group ->
+                            val isSelected = group.name in selectedGroupNames
+                            MonitorRow(
+                                name = formatGroupName(group.name),
+                                status = group.status,
+                                modifier = Modifier
+                                    .background(
+                                        if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                        else Color.Transparent
+                                    )
+                                    .combinedClickable(
+                                        onClick = {
+                                            if (isSelectionMode) {
+                                                if (isSelected) selectedGroupNames.remove(group.name)
+                                                else selectedGroupNames.add(group.name)
+                                            } else {
+                                                if (monitorId > 0) {
+                                                    // 特定のグループに絞り込んだ状態で Datadog の Web ページを開く
+                                                    val monitorUrl = buildString {
+                                                        append("${appUrl.trimEnd('/')}/monitors/$monitorId?q=${Uri.encode(group.name)}")
+                                                        group.lastTriggeredTs?.let { ts ->
+                                                            val fromTs = ts - 3600
+                                                            val now = System.currentTimeMillis() / 1000
+                                                            append("&from_ts=$fromTs")
+                                                            append("&start=$fromTs")
+                                                            append("&to_ts=$now")
+                                                            append("&end=$now")
+                                                        }
+                                                    }
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(monitorUrl))
+                                                    context.startActivity(intent)
+                                                }
+                                            }
+                                        },
+                                        onLongClick = {
+                                            if (!isSelected) {
+                                                selectedGroupNames.add(group.name)
+                                            }
+                                        }
+                                    )
                             )
                         }
                     }
                 }
             }
+        }
+    }
 
-            Spacer(modifier = Modifier.height(8.dp))
+    // ミュート時間選択ダイアログ
+    if (showMuteDialog) {
+        MuteDurationDialog(
+            onDismiss = { showMuteDialog = false },
+            onConfirm = { durationMins ->
+                showMuteDialog = false
+                scope.launch {
+                    val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
+                    val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
+                    val state = MonitorWidgetState(prefs)
 
-            if (filteredGroups.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = stringResource(R.string.no_monitor_data),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    val result = performBulkMute(
+                        context = context,
+                        state = state,
+                        monitorIds = listOf(monitorId),
+                        groupNames = selectedGroupNames.toList(),
+                        durationMinutes = durationMins
                     )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
-                ) {
-                    items(filteredGroups) { group ->
-                        MonitorRow(
-                            name = formatGroupName(group.name),
-                            status = group.status,
-                            modifier = Modifier.clickable {
-                                if (monitorId > 0) {
-                                    val monitorUrl = buildString {
-                                        append("${appUrl.trimEnd('/')}/monitors/$monitorId?q=${Uri.encode(group.name)}")
-                                        group.lastTriggeredTs?.let { ts ->
-                                            val fromTs = ts - 3600
-                                            val now = System.currentTimeMillis() / 1000
-                                            append("&from_ts=$fromTs")
-                                            append("&start=$fromTs")
-                                            append("&to_ts=$now")
-                                            append("&end=$now")
-                                        }
-                                    }
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(monitorUrl))
-                                    context.startActivity(intent)
-                                }
-                            }
-                        )
+
+                    result.onSuccess {
+                        selectedGroupNames.clear()
+                        // 画面を閉じて親（DetailActivity）に戻ることで再取得を促す
+                        (context as? ComponentActivity)?.finish()
                     }
                 }
             }
-        }
+        )
     }
 }
 
+/**
+ * Datadog の内部タグ形式を、表示用にフレンドリーな形式に整形します。
+ * 例: "host:my-host,service:api" -> "my-host:api"
+ */
 private fun formatGroupName(name: String): String {
-    // Group name format: "tag_name:tag_value,tag_name:tag_value,..."
-    // We want to extract only the "tag_value" and join them with ":"
     return name.split(",")
         .map { part ->
             val colonIndex = part.indexOf(':')
@@ -268,10 +395,14 @@ private fun formatGroupName(name: String): String {
 private fun getStatusColor(status: MonitorStatus): Color = when (status) {
     MonitorStatus.ALERT -> Color(0xFFF44336)
     MonitorStatus.WARN -> Color(0xFFFFA000)
+    MonitorStatus.MUTED -> Color(0xFF9C27B0)
     MonitorStatus.OK -> Color(0xFF4CAF50)
     MonitorStatus.NO_DATA -> Color(0xFF9E9E9E)
 }
 
+/**
+ * Compose の再構成時にグループリストの状態を保持するための Saver。
+ */
 private val monitorGroupStatusesSaver = listSaver<List<MonitorGroupStatus>, String>(
     save = { groups -> saveMonitorGroupStatuses(groups) },
     restore = { saved -> restoreMonitorGroupStatuses(saved) }

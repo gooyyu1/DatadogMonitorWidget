@@ -1,16 +1,13 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
 import android.appwidget.AppWidgetManager
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -19,24 +16,22 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProgressIndicatorDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -44,38 +39,37 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.state.PreferencesGlanceStateDefinition
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
+import jp.yuki_yamada.datadogmonitorwidget.ui.MuteDurationDialog
 import jp.yuki_yamada.datadogmonitorwidget.ui.StatusCountBadge
 import jp.yuki_yamada.datadogmonitorwidget.ui.theme.DatadogMonitorWidgetTheme
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import retrofit2.Retrofit
 
+/**
+ * ウィジェットをタップした際に表示される、モニター一覧の詳細画面。
+ * 複数のモニターの状態を一括で確認したり、ミュート操作を行ったりすることができます。
+ */
 class MonitorDetailActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,60 +91,76 @@ class MonitorDetailActivity : ComponentActivity() {
     }
 }
 
+/**
+ * モニター詳細画面のメイン UI。
+ * DataStore から現在のモニター情報を読み込み、リスト表示します。
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MonitorDetailScreen(appWidgetId: Int) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val json = remember { Json { ignoreUnknownKeys = true; prettyPrint = true } }
+    
+    // 表示用のモニターリスト。API レスポンスの生 JSON も保持します。
     var monitorsWithRawJson by remember { mutableStateOf<List<MonitorDetailWithRaw>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var updateProgress by remember { mutableFloatStateOf(0f) }
     var appUrl by remember { mutableStateOf("https://app.datadoghq.com/") }
 
+    // 選択モード（長押しで開始）の状態管理
     val selectedMonitorIds = remember { mutableStateListOf<Long>() }
     val isSelectionMode = selectedMonitorIds.isNotEmpty()
     var jsonLinesToShow by remember { mutableStateOf<List<String>?>(null) }
+    var showMuteDialog by remember { mutableStateOf(false) }
 
+    // 初期化時および更新時に DataStore からデータを読み込む
     LaunchedEffect(appWidgetId) {
         val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
         val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
-        val monitorDetailsJson = prefs[MonitorWidget.MONITOR_DETAILS_JSON] ?: "[]"
-        val initialMonitors = runCatching {
-            json.decodeFromString<List<Monitor>>(monitorDetailsJson).map { it.toMonitorDetail() }
-        }.getOrElse {
-            runCatching {
-                json.decodeFromString<List<MonitorDetail>>(monitorDetailsJson)
-            }.getOrDefault(emptyList())
-        }
-        monitorsWithRawJson = initialMonitors.map { MonitorDetailWithRaw(it, null) }
-            .sortedBy { monitorStatusPriority(it.detail.status) }
+        val state = MonitorWidgetState(prefs)
+        
+        val apiKey = state.apiKey
+        val appKey = state.appKey
+        val siteUrl = state.siteUrl
+        val monitorsJson = state.monitorDetailsJson
+        appUrl = state.appUrl
 
-        val apiKey = prefs[stringPreferencesKey("api_key")] ?: ""
-        val appKey = prefs[stringPreferencesKey("app_key")] ?: ""
-        val siteUrl = prefs[stringPreferencesKey("site_url")] ?: "https://api.datadoghq.com/"
-        appUrl = prefs[stringPreferencesKey("app_url")] ?: "https://app.datadoghq.com/"
-        val hasValidMonitorIds = initialMonitors.any { it.id > 0 }
-        if (apiKey.isBlank() || appKey.isBlank() || !hasValidMonitorIds) return@LaunchedEffect
-
-        val service = createDatadogApiService(json, siteUrl)
-        val refreshed = coroutineScope {
-            initialMonitors.map { monitor ->
-                async(Dispatchers.IO) {
-                    fetchMonitorDetailOrFallback(
-                        service = service,
-                        monitor = monitor,
-                        apiKey = apiKey,
-                        appKey = appKey,
-                        json = json
-                    )
-                }
-            }.awaitAll()
+        val initialMonitors = try {
+            json.decodeFromString<List<MonitorDetail>>(monitorsJson)
+        } catch (e: Exception) {
+            emptyList()
         }
-        monitorsWithRawJson = refreshed.sortedBy { monitorStatusPriority(it.detail.status) }
+
+        // 最初に一回だけソートし、API取得後の再ソートは行わない（ユーザーの操作ミス防止）
+        val sortedMonitors = initialMonitors.sortedBy { monitorStatusPriority(it.status) }
+
+        // 1. API 取得前に、キャッシュデータを表示する
+        val cachedItems = sortedMonitors.map { MonitorDetailWithRaw(it, null) }
+        monitorsWithRawJson = cachedItems
+        isLoading = false
+
+        if (sortedMonitors.isNotEmpty()) {
+            val client = DatadogApiClient(apiKey, appKey, siteUrl)
+            val updatedList = cachedItems.toMutableList()
+            
+            // 2. 逐次、最新情報を取得して更新し、進捗を表示する
+            sortedMonitors.forEachIndexed { index, monitor ->
+                val result = fetchMonitorDetailOrFallback(client, monitor)
+                updatedList[index] = result
+                // 1件ごとにリストを更新（順序は維持）
+                monitorsWithRawJson = updatedList.toList()
+                // 進捗率を更新
+                updateProgress = (index + 1).toFloat() / sortedMonitors.size
+            }
+        }
     }
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
         bottomBar = {
+            // 選択モード中の下部アクションバー
             if (isSelectionMode) {
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer,
@@ -169,9 +179,11 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
                             modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.titleMedium
                         )
-                        TextButton(onClick = { /* TODO: Mute implementation */ }) {
+                        // 選択したモニターを一括でミュート
+                        TextButton(onClick = { showMuteDialog = true }) {
                             Text("Mute")
                         }
+                        // 選択したモニターの生 JSON を表示
                         TextButton(onClick = {
                             val selectedItems = monitorsWithRawJson.filter { it.detail.id in selectedMonitorIds }
                             val fullJson = selectedItems.joinToString("\n\n---\n\n") { item ->
@@ -211,9 +223,34 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
                 OpenDatadogButton()
                 OpenWidgetSettingsButton(appWidgetId = appWidgetId)
             }
-            Spacer(modifier = Modifier.height(16.dp))
 
-            if (monitorsWithRawJson.isEmpty()) {
+            // 進捗バーのスムージング設定
+            val animatedProgress by animateFloatAsState(
+                targetValue = updateProgress,
+                animationSpec = ProgressIndicatorDefaults.ProgressAnimationSpec,
+                label = "progressSmoothing"
+            )
+
+            // 固定の高さを持つコンテナでプログレスバーを管理し、レイアウトのガタつきを防ぐ
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(12.dp), // バー(2dp) + 余白
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                if (updateProgress > 0f && updateProgress < 1f) {
+                    LinearProgressIndicator(
+                        progress = { animatedProgress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(2.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                }
+            }
+
+            if (monitorsWithRawJson.isEmpty() && !isLoading) {
                 Text(stringResource(R.string.no_monitor_data))
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -236,6 +273,7 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
                                         else selectedMonitorIds.add(monitor.id)
                                     } else {
                                         if (isMulti) {
+                                            // マルチモニター（グループあり）の場合は内訳画面へ
                                             context.startActivity(
                                                 Intent(context, MonitorBreakdownActivity::class.java).apply {
                                                     putExtra(MonitorBreakdownActivity.EXTRA_APPWIDGET_ID, appWidgetId)
@@ -248,6 +286,7 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
                                                 }
                                             )
                                         } else if (monitor.id > 0) {
+                                            // 単一モニターの場合は Datadog の Web ページを開く
                                             val monitorUrl = "${appUrl.trimEnd('/')}/monitors/${monitor.id}"
                                             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(monitorUrl))
                                             context.startActivity(intent)
@@ -268,14 +307,17 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
                                 overflow = TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.height(6.dp))
-                            if (monitor.isMultiAlert && statusCounts != null) {
+                            // マルチモニターの場合はステータスごとの件数をバッジで表示
+                            if (isMulti && statusCounts != null) {
                                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    StatusCountBadge("ALERT ${statusCounts.alert}", MonitorStatus.ALERT)
-                                    StatusCountBadge("WARN ${statusCounts.warn}", MonitorStatus.WARN)
-                                    StatusCountBadge("OK ${statusCounts.ok}", MonitorStatus.OK)
-                                    StatusCountBadge("NO DATA ${statusCounts.noData}", MonitorStatus.NO_DATA)
+                                    if (statusCounts.alert > 0) StatusCountBadge("ALERT ${statusCounts.alert}", MonitorStatus.ALERT)
+                                    if (statusCounts.warn > 0) StatusCountBadge("WARN ${statusCounts.warn}", MonitorStatus.WARN)
+                                    if (statusCounts.muted > 0) StatusCountBadge("MUTED ${statusCounts.muted}", MonitorStatus.MUTED)
+                                    if (statusCounts.ok > 0) StatusCountBadge("OK ${statusCounts.ok}", MonitorStatus.OK)
+                                    if (statusCounts.noData > 0) StatusCountBadge("NO DATA ${statusCounts.noData}", MonitorStatus.NO_DATA)
                                 }
                             } else {
+                                // 単一モニターの場合は現在のステータスをバッジで表示
                                 StatusCountBadge(monitor.status.name.replace('_', ' '), monitor.status)
                             }
                         }
@@ -285,132 +327,143 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
         }
     }
 
+    // 生 JSON 表示ダイアログ
     jsonLinesToShow?.let { lines ->
         Dialog(
             onDismissRequest = { jsonLinesToShow = null },
-            properties = DialogProperties(
-                decorFitsSystemWindows = true
-            )
         ) {
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                containerColor = Color.Black.copy(alpha = 0.5f), // 背景を暗く
-                contentWindowInsets = WindowInsets.safeDrawing
-            ) { innerPadding ->
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        shape = MaterialTheme.shapes.medium,
-                        color = MaterialTheme.colorScheme.surface
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(500.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 8.dp
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Raw Monitor JSON", style = MaterialTheme.typography.titleMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .background(
+                                MaterialTheme.colorScheme.surfaceVariant,
+                                RoundedCornerShape(8.dp)
+                            )
+                            .padding(8.dp)
                     ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Monitor JSON", style = MaterialTheme.typography.titleMedium)
-                            Spacer(modifier = Modifier.height(8.dp))
-                            LazyColumn(modifier = Modifier.weight(1f)) {
-                                items(lines) { line ->
-                                    Text(
-                                        text = line,
-                                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                TextButton(
-                                    onClick = {
-                                        val text = lines.joinToString("\n")
-                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                        val clip = ClipData.newPlainText("Monitor JSON", text)
-                                        clipboard.setPrimaryClip(clip)
-                                        Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                                    }
-                                ) {
-                                    Text("Copy")
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(onClick = { jsonLinesToShow = null }) {
-                                    Text("Close")
-                                }
-                            }
+                        items(lines) { line ->
+                            Text(
+                                text = line,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            )
                         }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = { jsonLinesToShow = null },
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text("Close")
                     }
                 }
             }
         }
     }
+
+    // ミュート時間選択ダイアログ
+    if (showMuteDialog) {
+        MuteDurationDialog(
+            onDismiss = { showMuteDialog = false },
+            onConfirm = { durationMins ->
+                showMuteDialog = false
+                scope.launch {
+                    val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
+                    val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
+                    val state = MonitorWidgetState(prefs)
+                    
+                    val result = performBulkMute(
+                        context = context,
+                        state = state,
+                        monitorIds = selectedMonitorIds.toList(),
+                        durationMinutes = durationMins
+                    )
+
+                    if (result.isSuccess) {
+                        selectedMonitorIds.clear()
+                        // ミュート後に一覧を再取得して表示を更新する
+                        val client = DatadogApiClient(state.apiKey, state.appKey, state.siteUrl)
+                        val monitorsJson = state.monitorDetailsJson
+                        val currentMonitors = json.decodeFromString<List<MonitorDetail>>(monitorsJson)
+                        val currentOrder = monitorsWithRawJson.map { it.detail.id }
+                        val updatedResults = currentMonitors.associateBy { it.id }.let { map ->
+                            currentOrder.mapNotNull { id ->
+                                map[id]?.let { fetchMonitorDetailOrFallback(client, it) }
+                            }
+                        }
+                        if (updatedResults.isNotEmpty()) {
+                            monitorsWithRawJson = updatedResults
+                        }
+                    }
+                }
+            }
+        )
+    }
 }
 
+/**
+ * Datadog の Web サイト（ダッシュボード等）を開くボタン。
+ */
 @Composable
 private fun OpenDatadogButton() {
     val context = LocalContext.current
     Button(
         onClick = {
-            val datadogIntent = context.packageManager.getLaunchIntentForPackage("com.datadog.app")
-                ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://app.datadoghq.com/"))
-            context.startActivity(datadogIntent)
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://app.datadoghq.com/monitors/manage"))
+            context.startActivity(intent)
         }
     ) {
         Text(stringResource(R.string.open_datadog_app))
     }
 }
 
+/**
+ * ウィジェットの設定画面を開くボタン。
+ */
 @Composable
 private fun OpenWidgetSettingsButton(appWidgetId: Int) {
     val context = LocalContext.current
     Button(
         onClick = {
-            context.startActivity(
-                Intent(context, WidgetConfigurationActivity::class.java).apply {
-                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-                }
-            )
+            val intent = Intent(context, WidgetConfigurationActivity::class.java).apply {
+                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+            }
+            context.startActivity(intent)
         }
     ) {
         Text(stringResource(R.string.open_widget_settings))
     }
 }
 
-private fun createDatadogApiService(json: Json, siteUrl: String): DatadogApiService =
-    Retrofit.Builder()
-        .baseUrl(siteUrl)
-        .client(OkHttpClient.Builder().build())
-        .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
-        .build()
-        .create(DatadogApiService::class.java)
-
+/**
+ * 最新のモニター詳細を取得します。取得に失敗した場合は、既存の情報を保持します。
+ */
 private suspend fun fetchMonitorDetailOrFallback(
-    service: DatadogApiService,
-    monitor: MonitorDetail,
-    apiKey: String,
-    appKey: String,
-    json: Json
-): MonitorDetailWithRaw {
-    if (monitor.id <= 0) return MonitorDetailWithRaw(monitor, null)
+    client: DatadogApiClient,
+    monitor: MonitorDetail
+): MonitorDetailWithRaw = withContext(Dispatchers.IO) {
+    if (monitor.id <= 0) return@withContext MonitorDetailWithRaw(monitor, null)
 
-    return runCatching {
-        val response = service.getMonitor(monitor.id, apiKey, appKey)
-        val responseBody = response.body()?.string()
-        if (!response.isSuccessful || responseBody.isNullOrBlank()) {
-            MonitorDetailWithRaw(monitor, responseBody)
-        } else {
-            MonitorDetailWithRaw(
-                detail = json.decodeFromString<MonitorDetailResponse>(responseBody)
-                    .toMonitorDetail(fallbackStatus = monitor.status),
-                rawJson = responseBody
-            )
-        }
+    runCatching {
+        val detail = client.getMonitorDetail(monitor.id, fallbackStatus = monitor.status)
+        MonitorDetailWithRaw(detail, detail.rawJson)
     }.getOrDefault(MonitorDetailWithRaw(monitor, null))
 }
 
+/**
+ * 画面表示用のラッパーモデル。モニター詳細と生 JSON をペアで保持します。
+ */
 private data class MonitorDetailWithRaw(
     val detail: MonitorDetail,
     val rawJson: String?
