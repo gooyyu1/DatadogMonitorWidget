@@ -34,4 +34,36 @@ class DatadogModelsTest {
             sorted
         )
     }
+
+    @Test
+    fun `isMultiAlert true when only group statuses exist`() {
+        val detail = MonitorDetail(
+            name = "multi",
+            status = MonitorStatus.ALERT,
+            groupStatuses = listOf(
+                MonitorGroupStatus("group-a", MonitorStatus.ALERT)
+            )
+        )
+
+        assertEquals(true, detail.isMultiAlert)
+    }
+
+    @Test
+    fun `resolvedStatusCounts derives counts from group statuses when status counts are missing`() {
+        val detail = MonitorDetail(
+            name = "multi",
+            status = MonitorStatus.ALERT,
+            groupStatuses = listOf(
+                MonitorGroupStatus("a", MonitorStatus.ALERT),
+                MonitorGroupStatus("b", MonitorStatus.WARN),
+                MonitorGroupStatus("c", MonitorStatus.OK),
+                MonitorGroupStatus("d", MonitorStatus.NO_DATA)
+            )
+        )
+
+        assertEquals(1, detail.resolvedStatusCounts?.alert)
+        assertEquals(1, detail.resolvedStatusCounts?.warn)
+        assertEquals(1, detail.resolvedStatusCounts?.ok)
+        assertEquals(1, detail.resolvedStatusCounts?.noData)
+    }
 }

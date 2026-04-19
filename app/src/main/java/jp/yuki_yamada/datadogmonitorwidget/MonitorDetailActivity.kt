@@ -155,6 +155,7 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 monitors.forEach { monitor ->
+                    val statusCounts = monitor.resolvedStatusCounts
                     val rowModifier = if (monitor.isMultiAlert) {
                         Modifier
                             .fillMaxWidth()
@@ -180,12 +181,12 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
                             overflow = TextOverflow.Ellipsis
                         )
                         Spacer(modifier = Modifier.height(6.dp))
-                        if (monitor.isMultiAlert && monitor.statusCounts != null) {
+                        if (monitor.isMultiAlert && statusCounts != null) {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                StatusCountBadge("ALERT ${monitor.statusCounts.alert}", MonitorStatus.ALERT)
-                                StatusCountBadge("WARN ${monitor.statusCounts.warn}", MonitorStatus.WARN)
-                                StatusCountBadge("OK ${monitor.statusCounts.ok}", MonitorStatus.OK)
-                                StatusCountBadge("NO DATA ${monitor.statusCounts.noData}", MonitorStatus.NO_DATA)
+                                StatusCountBadge("ALERT ${statusCounts.alert}", MonitorStatus.ALERT)
+                                StatusCountBadge("WARN ${statusCounts.warn}", MonitorStatus.WARN)
+                                StatusCountBadge("OK ${statusCounts.ok}", MonitorStatus.OK)
+                                StatusCountBadge("NO DATA ${statusCounts.noData}", MonitorStatus.NO_DATA)
                             }
                         } else {
                             StatusCountBadge(monitor.status.name.replace('_', ' '), monitor.status)
