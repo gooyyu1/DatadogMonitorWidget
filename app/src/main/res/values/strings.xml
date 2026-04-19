@@ -4,4 +4,5 @@
     <string name="monitor_breakdown_title">Monitor breakdown</string>
     <string name="no_monitor_data">No monitor data</string>
     <string name="open_datadog_app">Open Datadog app</string>
+    <string name="datadog_response_json_title">Datadog response JSON</string>
 </resources>

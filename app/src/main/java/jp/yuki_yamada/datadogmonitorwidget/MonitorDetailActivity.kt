@@ -49,6 +49,8 @@ import jp.yuki_yamada.datadogmonitorwidget.ui.theme.DatadogMonitorWidgetTheme
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -135,11 +137,13 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
     val context = LocalContext.current
     val json = remember { Json { ignoreUnknownKeys = true } }
     var monitors by remember { mutableStateOf<List<MonitorDetail>>(emptyList()) }
+    var datadogResponseJson by remember { mutableStateOf("[]") }
 
     LaunchedEffect(appWidgetId) {
         val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
         val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
         val monitorDetailsJson = prefs[MonitorWidget.MONITOR_DETAILS_JSON] ?: "[]"
+        datadogResponseJson = monitorDetailsJson
         val parsed = runCatching {
             json.decodeFromString<List<Monitor>>(monitorDetailsJson).map { it.toMonitorDetail() }
         }.getOrElse {
@@ -169,7 +173,8 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
                 }
             }.awaitAll()
         }
-        monitors = refreshed.sortedBy { monitorStatusPriority(it.status) }
+        monitors = refreshed.map { it.monitorDetail }.sortedBy { monitorStatusPriority(it.status) }
+        datadogResponseJson = buildDatadogResponseJson(refreshed.mapNotNull { it.responseJson })
     }
 
     Column(
@@ -231,6 +236,17 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = stringResource(R.string.datadog_response_json_title),
+            style = MaterialTheme.typography.titleMedium
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = datadogResponseJson,
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
@@ -305,17 +321,35 @@ private suspend fun fetchMonitorDetailOrFallback(
     apiKey: String,
     appKey: String,
     json: Json
-): MonitorDetail {
-    if (monitor.id <= 0) return monitor
+): MonitorDetailFetchResult {
+    if (monitor.id <= 0) return MonitorDetailFetchResult(monitorDetail = monitor)
 
     return runCatching {
         val response = service.getMonitor(monitor.id, apiKey, appKey)
         val responseBody = response.body()?.string()
         if (!response.isSuccessful || responseBody.isNullOrBlank()) {
-            monitor
+            MonitorDetailFetchResult(monitorDetail = monitor)
         } else {
-            json.decodeFromString<MonitorDetailResponse>(responseBody)
-                .toMonitorDetail(fallbackStatus = monitor.status)
+            MonitorDetailFetchResult(
+                monitorDetail = json.decodeFromString<MonitorDetailResponse>(responseBody)
+                    .toMonitorDetail(fallbackStatus = monitor.status),
+                responseJson = responseBody
+            )
         }
-    }.getOrDefault(monitor)
+    }.getOrDefault(MonitorDetailFetchResult(monitorDetail = monitor))
+}
+
+private data class MonitorDetailFetchResult(
+    val monitorDetail: MonitorDetail,
+    val responseJson: String? = null
+)
+
+internal fun buildDatadogResponseJson(rawResponses: List<String>): String {
+    if (rawResponses.isEmpty()) return "[]"
+    val prettyJson = Json { prettyPrint = true }
+    val elements = rawResponses.map { raw ->
+        runCatching { prettyJson.parseToJsonElement(raw) }
+            .getOrElse { JsonPrimitive(raw) }
+    }
+    return prettyJson.encodeToString(JsonArray(elements))
 }
