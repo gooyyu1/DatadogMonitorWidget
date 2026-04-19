@@ -182,7 +182,10 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
             style = MaterialTheme.typography.headlineSmall
         )
         Spacer(modifier = Modifier.height(12.dp))
-        OpenDatadogButton()
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OpenDatadogButton()
+            OpenWidgetSettingsButton(appWidgetId = appWidgetId)
+        }
         Spacer(modifier = Modifier.height(16.dp))
 
         if (monitors.isEmpty()) {
@@ -246,6 +249,22 @@ private fun OpenDatadogButton() {
         }
     ) {
         Text(stringResource(R.string.open_datadog_app))
+    }
+}
+
+@Composable
+private fun OpenWidgetSettingsButton(appWidgetId: Int) {
+    val context = LocalContext.current
+    Button(
+        onClick = {
+            context.startActivity(
+                Intent(context, WidgetConfigurationActivity::class.java).apply {
+                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                }
+            )
+        }
+    ) {
+        Text(stringResource(R.string.open_widget_settings))
     }
 }
 
