@@ -1,6 +1,7 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
 import android.content.Context
+import android.util.Log
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
@@ -86,6 +87,8 @@ class MonitorWorker(
             val monitors = monitorResponse.monitors
             val monitorDetails = runCatching {
                 parseMonitorDetails(json, responseBodyString)
+            }.onFailure { error ->
+                Log.w("MonitorWorker", "Failed to parse monitor details", error)
             }.getOrDefault(emptyList())
             val total = monitors.size
             val okCount = monitors.count { MonitorStatus.fromRaw(it.status) == MonitorStatus.OK }

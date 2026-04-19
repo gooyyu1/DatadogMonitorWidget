@@ -20,11 +20,12 @@ enum class MonitorStatus {
 
     companion object {
         fun fromRaw(raw: String?): MonitorStatus {
-            return when (raw?.trim()?.uppercase()?.replace(" ", "_")) {
+            val normalized = raw?.trim()?.uppercase()
+            return when (normalized) {
                 "ALERT", "ALERTING" -> ALERT
                 "WARN", "WARNING" -> WARN
                 "OK" -> OK
-                "NO_DATA", "NODATA", "UNKNOWN" -> NO_DATA
+                "NO DATA", "NO_DATA", "NODATA", "UNKNOWN" -> NO_DATA
                 else -> NO_DATA
             }
         }
