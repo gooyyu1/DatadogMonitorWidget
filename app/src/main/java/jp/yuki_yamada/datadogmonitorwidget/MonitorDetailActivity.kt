@@ -4,7 +4,6 @@ import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -45,8 +44,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.state.PreferencesGlanceStateDefinition
-import com.datadog.api.client.ApiException
-import com.datadog.api.client.v1.api.MonitorsApi
+import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import jp.yuki_yamada.datadogmonitorwidget.ui.theme.DatadogMonitorWidgetTheme
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -55,6 +53,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import retrofit2.Retrofit
 
 class MonitorDetailActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -154,13 +155,16 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
         val hasValidMonitorIds = monitors.any { it.id > 0 }
         if (apiKey.isBlank() || appKey.isBlank() || !hasValidMonitorIds) return@LaunchedEffect
 
-        val service = createMonitorsApi(apiKey, appKey, siteUrl)
+        val service = createDatadogApiService(json, siteUrl)
         val refreshed = coroutineScope {
             monitors.map { monitor ->
                 async(Dispatchers.IO) {
                     fetchMonitorDetailOrFallback(
                         service = service,
                         monitor = monitor,
+                        apiKey = apiKey,
+                        appKey = appKey,
+                        json = json
                     )
                 }
             }.awaitAll()
@@ -306,33 +310,36 @@ private fun StatusCountBadge(text: String, status: MonitorStatus) {
 
 private const val EXTRA_MONITOR_NAME = "monitor_name"
 private const val EXTRA_GROUP_STATUSES_JSON = "group_statuses_json"
-private const val MONITOR_DETAIL_TAG = "MonitorDetailActivity"
+
+private fun createDatadogApiService(json: Json, siteUrl: String): DatadogApiService =
+    Retrofit.Builder()
+        .baseUrl(siteUrl)
+        .client(OkHttpClient.Builder().build())
+        .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+        .build()
+        .create(DatadogApiService::class.java)
 
 private suspend fun fetchMonitorDetailOrFallback(
-    service: MonitorsApi,
-    monitor: MonitorDetail
+    service: DatadogApiService,
+    monitor: MonitorDetail,
+    apiKey: String,
+    appKey: String,
+    json: Json
 ): MonitorDetailFetchResult {
     if (monitor.id <= 0) return MonitorDetailFetchResult(monitorDetail = monitor)
 
-    return try {
-        val response = service.getMonitor(
-            monitor.id,
-            MonitorsApi.GetMonitorOptionalParameters().groupStates("all")
-        )
-        MonitorDetailFetchResult(
-            monitorDetail = response.toMonitorDetail(fallbackStatus = monitor.status)
-        )
-    } catch (e: ApiException) {
-        Log.w(
-            MONITOR_DETAIL_TAG,
-            "Failed to fetch monitor detail from Datadog API for monitorId=${monitor.id}, status=${e.code}, response=${e.responseBody}",
-            e
-        )
-        MonitorDetailFetchResult(monitorDetail = monitor)
-    } catch (e: Exception) {
-        Log.w(MONITOR_DETAIL_TAG, "Unexpected error while fetching monitor detail for monitorId=${monitor.id}", e)
-        MonitorDetailFetchResult(monitorDetail = monitor)
-    }
+    return runCatching {
+        val response = service.getMonitor(monitor.id, apiKey, appKey)
+        val responseBody = response.body()?.string()
+        if (!response.isSuccessful || responseBody.isNullOrBlank()) {
+            MonitorDetailFetchResult(monitorDetail = monitor)
+        } else {
+            MonitorDetailFetchResult(
+                monitorDetail = json.decodeFromString<MonitorDetailResponse>(responseBody)
+                    .toMonitorDetail(fallbackStatus = monitor.status)
+            )
+        }
+    }.getOrDefault(MonitorDetailFetchResult(monitorDetail = monitor))
 }
 
 private data class MonitorDetailFetchResult(

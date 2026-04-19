@@ -10,6 +10,11 @@ data class Monitor(
     val status: String // Datadog Monitor Search API uses "status"
 )
 
+@Serializable
+data class MonitorSearchResponse(
+    val monitors: List<Monitor>
+)
+
 enum class MonitorStatus {
     OK, WARN, ALERT, NO_DATA;
 
@@ -73,8 +78,52 @@ data class MonitorDetail(
         }
 }
 
+@Serializable
+data class MonitorDetailResponse(
+    val id: Long,
+    val name: String,
+    @SerialName("overall_state")
+    val overallState: String? = null,
+    val multi: Boolean = false,
+    val state: MonitorState? = null
+)
+
+@Serializable
+data class MonitorState(
+    val groups: Map<String, MonitorStateGroup> = emptyMap()
+)
+
+@Serializable
+data class MonitorStateGroup(
+    val name: String? = null,
+    val status: String? = null,
+    @SerialName("overall_state")
+    val overallState: String? = null
+)
+
 fun Monitor.toMonitorDetail(): MonitorDetail = MonitorDetail(
     id = id,
     name = name,
     status = MonitorStatus.fromRaw(status)
 )
+
+fun MonitorDetailResponse.toMonitorDetail(fallbackStatus: MonitorStatus): MonitorDetail {
+    val groups = state
+        ?.groups
+        ?.map { (groupKey, groupState) ->
+            MonitorGroupStatus(
+                name = groupState.name?.takeIf { it.isNotBlank() } ?: groupKey,
+                status = MonitorStatus.fromRaw(groupState.status ?: groupState.overallState)
+            )
+        }
+        .orEmpty()
+        .sortedBy { monitorStatusPriority(it.status) }
+
+    return MonitorDetail(
+        id = id,
+        name = name,
+        status = if (overallState.isNullOrBlank()) fallbackStatus else MonitorStatus.fromRaw(overallState),
+        isMultiMonitor = multi,
+        groupStatuses = groups
+    )
+}
