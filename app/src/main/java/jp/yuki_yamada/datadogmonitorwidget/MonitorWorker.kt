@@ -12,10 +12,13 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.ListenableWorker
-import com.datadog.api.client.ApiException
-import com.datadog.api.client.v1.api.MonitorsApi
+import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.encodeToString
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Retrofit
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -46,16 +49,36 @@ class MonitorWorker(
         }
 
         try {
-            val json = Json { ignoreUnknownKeys = true }
-            val monitorsApi = createMonitorsApi(apiKey, appKey, siteUrl)
-            val monitorResponse = try {
-                monitorsApi.searchMonitors(
-                    MonitorsApi.SearchMonitorsOptionalParameters().query(query)
-                )
-            } catch (e: ApiException) {
-                throw Exception("API Error: ${e.code}\nResponse: ${e.responseBody ?: "Empty body"}", e)
+            val logging = HttpLoggingInterceptor().apply {
+                level = HttpLoggingInterceptor.Level.BASIC
             }
-            val monitors = monitorResponse.monitors.orEmpty().mapNotNull { it.toMonitorOrNull() }
+            val client = OkHttpClient.Builder()
+                .addInterceptor(logging)
+                .build()
+
+            val json = Json { ignoreUnknownKeys = true }
+            val retrofit = Retrofit.Builder()
+                .baseUrl(siteUrl)
+                .client(client)
+                .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+                .build()
+
+            val service = retrofit.create(DatadogApiService::class.java)
+            val response = service.searchMonitors(apiKey, appKey, query)
+
+            val requestUrl = response.raw().request.url.toString()
+            val responseBodyString = if (response.isSuccessful) {
+                response.body()?.string()
+            } else {
+                response.errorBody()?.string()
+            } ?: "Empty body"
+
+            if (!response.isSuccessful) {
+                throw Exception("API Error: ${response.code()}\nURL: $requestUrl\nResponse: $responseBodyString")
+            }
+
+            val monitorResponse = json.decodeFromString<MonitorSearchResponse>(responseBodyString)
+            val monitors = monitorResponse.monitors
             val total = monitors.size
             val okCount = monitors.count { MonitorStatus.fromRaw(it.status) == MonitorStatus.OK }
             val alertCount = monitors.count { MonitorStatus.fromRaw(it.status) == MonitorStatus.ALERT }

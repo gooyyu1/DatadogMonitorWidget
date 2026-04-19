@@ -34,13 +34,6 @@ android {
     buildFeatures {
         compose = true
     }
-    packaging {
-        resources {
-            excludes += "/META-INF/NOTICE*"
-            excludes += "/META-INF/LICENSE*"
-            excludes += "/META-INF/DEPENDENCIES*"
-        }
-    }
 }
 
 dependencies {
@@ -58,7 +51,9 @@ dependencies {
     implementation(libs.androidx.glance.material3)
 
     // Network
-    implementation(libs.datadog.api.client)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.serialization)
+    implementation(libs.okhttp.logging)
     implementation(libs.kotlinx.serialization.json)
 
     // DataStore
