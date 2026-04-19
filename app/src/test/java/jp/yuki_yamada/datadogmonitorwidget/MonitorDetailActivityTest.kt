@@ -33,4 +33,30 @@ class MonitorDetailActivityTest {
 
         assertEquals(emptyList<MonitorGroupStatus>(), groups)
     }
+
+    @Test
+    fun `save and restore monitor group statuses round trip`() {
+        val original = listOf(
+            MonitorGroupStatus("group-alert", MonitorStatus.ALERT),
+            MonitorGroupStatus("group-ok", MonitorStatus.OK)
+        )
+
+        val restored = restoreMonitorGroupStatuses(saveMonitorGroupStatuses(original))
+
+        assertEquals(original, restored)
+    }
+
+    @Test
+    fun `restore monitor group statuses returns empty list for odd-sized data`() {
+        val restored = restoreMonitorGroupStatuses(listOf("group-alert", "ALERT", "dangling"))
+
+        assertEquals(emptyList<MonitorGroupStatus>(), restored)
+    }
+
+    @Test
+    fun `restore monitor group statuses returns empty list for invalid enum`() {
+        val restored = restoreMonitorGroupStatuses(listOf("group-alert", "UNKNOWN_STATUS"))
+
+        assertEquals(emptyList<MonitorGroupStatus>(), restored)
+    }
 }

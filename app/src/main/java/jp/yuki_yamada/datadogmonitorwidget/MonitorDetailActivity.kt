@@ -34,6 +34,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -119,8 +121,10 @@ private fun MonitorBreakdownScreen(
     modifier: Modifier = Modifier
 ) {
     val json = remember { Json { ignoreUnknownKeys = true } }
-    var groups by remember { mutableStateOf<List<MonitorGroupStatus>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    var groups by rememberSaveable(stateSaver = monitorGroupStatusesSaver) {
+        mutableStateOf(emptyList())
+    }
+    var isLoading by rememberSaveable { mutableStateOf(true) }
 
     LaunchedEffect(groupStatusesJson) {
         groups = withContext(Dispatchers.Default) {
@@ -343,12 +347,31 @@ private fun StatusCountBadge(text: String, status: MonitorStatus) {
 
 private const val EXTRA_MONITOR_NAME = "monitor_name"
 private const val EXTRA_GROUP_STATUSES_JSON = "group_statuses_json"
+private val monitorGroupStatusesSaver = listSaver<List<MonitorGroupStatus>, String>(
+    save = { groups -> saveMonitorGroupStatuses(groups) },
+    restore = { saved -> restoreMonitorGroupStatuses(saved) }
+)
 
 internal fun decodeMonitorGroupStatuses(json: Json, groupStatusesJson: String): List<MonitorGroupStatus> =
     runCatching {
         json.decodeFromString<List<MonitorGroupStatus>>(groupStatusesJson)
     }.getOrDefault(emptyList())
         .sortedBy { monitorStatusPriority(it.status) }
+
+internal fun saveMonitorGroupStatuses(groups: List<MonitorGroupStatus>): List<String> =
+    groups.flatMap { listOf(it.name, it.status.name) }
+
+internal fun restoreMonitorGroupStatuses(saved: List<String>): List<MonitorGroupStatus> {
+    if (saved.size % 2 != 0) return emptyList()
+    return runCatching {
+        saved.chunked(2).map { chunk ->
+            MonitorGroupStatus(
+                name = chunk[0],
+                status = MonitorStatus.valueOf(chunk[1])
+            )
+        }
+    }.getOrDefault(emptyList())
+}
 
 private fun createDatadogApiService(json: Json, siteUrl: String): DatadogApiService =
     Retrofit.Builder()
