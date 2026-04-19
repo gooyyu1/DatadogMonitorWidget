@@ -1,9 +1,13 @@
 package jp.yuki_yamada.datadogmonitorwidget
 
+import com.datadog.api.client.ApiClient
+import com.datadog.api.client.v1.model.Monitor as DatadogMonitor
+import com.datadog.api.client.v1.model.MonitorSearchResult
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DatadogModelsTest {
+    private val mapper = ApiClient().json.mapper
 
     @Test
     fun `fromRaw maps monitor statuses`() {
@@ -81,18 +85,53 @@ class DatadogModelsTest {
     }
 
     @Test
-    fun `monitor detail response maps multi and group statuses`() {
-        val response = MonitorDetailResponse(
-            id = 7L,
-            name = "multi monitor",
-            overallState = "Warn",
-            multi = true,
-            state = MonitorState(
-                groups = mapOf(
-                    "env:prod" to MonitorStateGroup(status = "Alert"),
-                    "env:stg" to MonitorStateGroup(status = "OK")
-                )
-            )
+    fun `monitor search result maps to app monitor`() {
+        val result = mapper.readValue(
+            """{"id":99,"name":"search monitor","status":"Alert"}""",
+            MonitorSearchResult::class.java
+        )
+
+        val monitor = result.toMonitorOrNull()
+
+        assertEquals(99L, monitor?.id)
+        assertEquals("search monitor", monitor?.name)
+        assertEquals("Alert", monitor?.status)
+    }
+
+    @Test
+    fun `monitor search result defaults missing optional fields to empty strings`() {
+        val result = mapper.readValue(
+            """{"id":100}""",
+            MonitorSearchResult::class.java
+        )
+
+        val monitor = result.toMonitorOrNull()
+
+        assertEquals(100L, monitor?.id)
+        assertEquals("", monitor?.name)
+        assertEquals("", monitor?.status)
+    }
+
+    @Test
+    fun `datadog monitor maps multi and group statuses`() {
+        val response = mapper.readValue(
+            """
+            {
+              "id": 7,
+              "name": "multi monitor",
+              "query": "avg(last_5m):avg:system.cpu.user{*} > 90",
+              "type": "query alert",
+              "overall_state": "Warn",
+              "multi": true,
+              "state": {
+                "groups": {
+                  "env:prod": { "status": "Alert" },
+                  "env:stg": { "status": "OK" }
+                }
+              }
+            }
+            """.trimIndent(),
+            DatadogMonitor::class.java
         )
 
         val detail = response.toMonitorDetail(fallbackStatus = MonitorStatus.NO_DATA)
@@ -104,5 +143,31 @@ class DatadogModelsTest {
         assertEquals(2, detail.groupStatuses.size)
         assertEquals(MonitorStatus.ALERT, detail.groupStatuses[0].status)
         assertEquals(MonitorStatus.OK, detail.groupStatuses[1].status)
+    }
+
+    @Test
+    fun `datadog monitor group name falls back to group key when blank`() {
+        val response = mapper.readValue(
+            """
+            {
+              "id": 8,
+              "name": "fallback monitor",
+              "query": "avg(last_5m):avg:system.cpu.user{*} > 90",
+              "type": "query alert",
+              "state": {
+                "groups": {
+                  "env:prod": { "name": "", "status": "Alert" }
+                }
+              }
+            }
+            """.trimIndent(),
+            DatadogMonitor::class.java
+        )
+
+        val detail = response.toMonitorDetail(fallbackStatus = MonitorStatus.NO_DATA)
+
+        assertEquals(1, detail.groupStatuses.size)
+        assertEquals("env:prod", detail.groupStatuses[0].name)
+        assertEquals(MonitorStatus.ALERT, detail.groupStatuses[0].status)
     }
 }
