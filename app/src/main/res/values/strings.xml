@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">Datadog Monitor Widget</string>
+    <string name="monitor_details_title">Monitor details</string>
+    <string name="monitor_breakdown_title">Monitor breakdown</string>
+    <string name="no_monitor_data">No monitor data</string>
+    <string name="open_datadog_app">Open Datadog app</string>
 </resources>
