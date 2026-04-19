@@ -19,10 +19,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -53,6 +56,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
@@ -90,40 +94,69 @@ class MonitorBreakdownActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val monitorName = intent.getStringExtra(EXTRA_MONITOR_NAME).orEmpty()
         val groupStatusesJson = intent.getStringExtra(EXTRA_GROUP_STATUSES_JSON).orEmpty()
-        val json = Json { ignoreUnknownKeys = true }
-        val groups = runCatching {
-            json.decodeFromString<List<MonitorGroupStatus>>(groupStatusesJson)
-        }.getOrDefault(emptyList()).sortedBy { monitorStatusPriority(it.status) }
 
         enableEdgeToEdge()
         setContent {
             DatadogMonitorWidgetTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Column(
+                    MonitorBreakdownScreen(
+                        monitorName = monitorName,
+                        groupStatusesJson = groupStatusesJson,
                         modifier = Modifier
                             .padding(innerPadding)
                             .fillMaxSize()
-                            .padding(16.dp)
-                    ) {
-                        Text(
-                            text = if (monitorName.isBlank()) stringResource(R.string.monitor_breakdown_title) else monitorName,
-                            style = MaterialTheme.typography.headlineSmall
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState()),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            groups.forEach { group ->
-                                MonitorRow(
-                                    name = group.name,
-                                    status = group.status
-                                )
-                            }
-                        }
-                    }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MonitorBreakdownScreen(
+    monitorName: String,
+    groupStatusesJson: String,
+    modifier: Modifier = Modifier
+) {
+    val json = remember { Json { ignoreUnknownKeys = true } }
+    var groups by remember { mutableStateOf<List<MonitorGroupStatus>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(groupStatusesJson) {
+        groups = withContext(Dispatchers.Default) {
+            decodeMonitorGroupStatuses(json, groupStatusesJson)
+        }
+        isLoading = false
+    }
+
+    Column(
+        modifier = modifier
+            .padding(16.dp)
+            .fillMaxSize()
+    ) {
+        Text(
+            text = if (monitorName.isBlank()) stringResource(R.string.monitor_breakdown_title) else monitorName,
+            style = MaterialTheme.typography.headlineSmall
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(groups) { group ->
+                    MonitorRow(
+                        name = group.name,
+                        status = group.status
+                    )
                 }
             }
         }
@@ -310,6 +343,12 @@ private fun StatusCountBadge(text: String, status: MonitorStatus) {
 
 private const val EXTRA_MONITOR_NAME = "monitor_name"
 private const val EXTRA_GROUP_STATUSES_JSON = "group_statuses_json"
+
+internal fun decodeMonitorGroupStatuses(json: Json, groupStatusesJson: String): List<MonitorGroupStatus> =
+    runCatching {
+        json.decodeFromString<List<MonitorGroupStatus>>(groupStatusesJson)
+    }.getOrDefault(emptyList())
+        .sortedBy { monitorStatusPriority(it.status) }
 
 private fun createDatadogApiService(json: Json, siteUrl: String): DatadogApiService =
     Retrofit.Builder()
