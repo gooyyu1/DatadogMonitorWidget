@@ -79,9 +79,6 @@ class MonitorWorker(
 
             val monitorResponse = json.decodeFromString<MonitorSearchResponse>(responseBodyString)
             val monitors = monitorResponse.monitors
-            val monitorDetails = monitors
-                .map { it.toMonitorDetail() }
-                .sortedBy { monitorStatusPriority(it.status) }
             val total = monitors.size
             val okCount = monitors.count { MonitorStatus.fromRaw(it.status) == MonitorStatus.OK }
             val alertCount = monitors.count { MonitorStatus.fromRaw(it.status) == MonitorStatus.ALERT }
@@ -95,7 +92,7 @@ class MonitorWorker(
                 else -> MonitorStatus.OK
             }
 
-            updateWidgetUI(appWidgetId, statusText, monitorStatus, json.encodeToString(monitorDetails))
+            updateWidgetUI(appWidgetId, statusText, monitorStatus, json.encodeToString(monitors))
             
             val currentTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
             saveSuccess(appWidgetId, currentTime)

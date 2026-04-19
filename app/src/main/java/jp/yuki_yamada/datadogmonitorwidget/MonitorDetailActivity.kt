@@ -141,10 +141,10 @@ private fun MonitorDetailScreen(appWidgetId: Int, modifier: Modifier = Modifier)
         val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
         val monitorDetailsJson = prefs[MonitorWidget.MONITOR_DETAILS_JSON] ?: "[]"
         val parsed = runCatching {
-            json.decodeFromString<List<MonitorDetail>>(monitorDetailsJson)
+            json.decodeFromString<List<Monitor>>(monitorDetailsJson).map { it.toMonitorDetail() }
         }.getOrElse {
             runCatching {
-                json.decodeFromString<List<Monitor>>(monitorDetailsJson).map { it.toMonitorDetail() }
+                json.decodeFromString<List<MonitorDetail>>(monitorDetailsJson)
             }.getOrDefault(emptyList())
         }
         monitors = parsed.sortedBy { monitorStatusPriority(it.status) }
