@@ -20,6 +20,20 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
+internal fun applyWidgetUiState(
+    mutableState: MutableMonitorWidgetState,
+    appWidgetId: Int,
+    text: String,
+    status: MonitorStatus,
+    monitorDetailsJson: String
+) {
+    mutableState.statusText = text
+    mutableState.statusColor = status.name
+    mutableState.lastUpdateMillis = System.currentTimeMillis()
+    mutableState.appWidgetId = appWidgetId
+    mutableState.monitorDetailsJson = monitorDetailsJson
+}
+
 /**
  * 背面で Datadog API からデータを取得し、ウィジェットの表示内容を更新する Worker クラス。
  * WorkManager によって定期的に実行されます（[scheduleNextWork] による連鎖実行）。
@@ -124,12 +138,7 @@ class MonitorWorker(
         updateAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId) { prefs ->
             prefs.toMutablePreferences().apply {
                 val mutableState = MutableMonitorWidgetState(this)
-                mutableState.statusText = text
-                mutableState.statusColor = status.name
-                mutableState.lastUpdateMillis = System.currentTimeMillis()
-                mutableState.appWidgetId = appWidgetId
-                mutableState.monitorDetailsJson = monitorDetailsJson
-                mutableState.lastError = "" // 成功時はエラーをクリア
+                applyWidgetUiState(mutableState, appWidgetId, text, status, monitorDetailsJson)
             }
         }
         // Glance にウィジェットを再描画するよう通知
