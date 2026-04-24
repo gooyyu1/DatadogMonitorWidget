@@ -84,7 +84,7 @@ fun StatusCountBadge(text: String, status: MonitorStatus) {
 
 /**
  * ミュート期間を選択するためのダイアログ。
- * 1時間、4時間、24時間、無期限の選択肢を提供します。
+ * 4時間、8時間、12時間、16時間、24時間、1ヶ月の選択肢を提供します。
  *
  * @param onDismiss ダイアログを閉じる際のコールバック
  * @param onConfirm 期間（ミリ秒）が選択された際のコールバック
@@ -107,7 +107,9 @@ fun MuteDurationDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 val durations = listOf(
                     "4 hours" to 240L,
+                    "8 hours" to 480L,
                     "12 hours" to 720L,
+                    "16 hours" to 960L,
                     "24 hours" to 1440L,
                     "1 month" to 43200L
                 )
