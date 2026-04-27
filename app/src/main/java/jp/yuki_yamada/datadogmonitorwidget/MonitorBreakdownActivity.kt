@@ -57,10 +57,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.glance.appwidget.GlanceAppWidgetManager
-import androidx.glance.appwidget.state.getAppWidgetState
-import androidx.glance.state.PreferencesGlanceStateDefinition
 import jp.yuki_yamada.datadogmonitorwidget.ui.MonitorRow
 import jp.yuki_yamada.datadogmonitorwidget.ui.MuteDurationDialog
 import jp.yuki_yamada.datadogmonitorwidget.ui.StatusCountBadge
@@ -128,9 +124,6 @@ private fun MonitorBreakdownScreen(
     var isLoading by rememberSaveable { mutableStateOf(true) }
     var isRefreshing by remember { mutableStateOf(false) }
     var appUrl by remember { mutableStateOf("https://app.datadoghq.com/") }
-    var apiKey by remember { mutableStateOf("") }
-    var appKey by remember { mutableStateOf("") }
-    var siteUrl by remember { mutableStateOf("https://api.datadoghq.com/") }
 
     // 選択（一括ミュート用）の状態管理
     val selectedGroupNames = remember { mutableStateListOf<String>() }
@@ -168,14 +161,10 @@ private fun MonitorBreakdownScreen(
             hasDefaultTabBeenSet = true
         }
 
-        val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
-        val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
-        val state = MonitorWidgetState(prefs)
-        
-        appUrl = state.appUrl
-        apiKey = state.apiKey
-        appKey = state.appKey
-        siteUrl = state.siteUrl
+        if (appWidgetId > 0) {
+            val settings = MonitorDataRepository(context, appWidgetId).getSettings()
+            appUrl = settings.appUrl
+        }
 
         isLoading = false
     }
@@ -217,13 +206,13 @@ private fun MonitorBreakdownScreen(
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             onRefresh = {
-                if (!isLoading && apiKey.isNotBlank() && appKey.isNotBlank() && monitorId > 0) {
+                if (!isLoading && monitorId > 0) {
                     isRefreshing = true
                     scope.launch {
                         runCatching {
-                            val client = DatadogApiClient(apiKey, appKey, siteUrl)
+                            val repository = MonitorDataRepository(context, appWidgetId)
                             val freshDetail = withContext(Dispatchers.IO) {
-                                client.getMonitorDetail(monitorId, fallbackStatus = MonitorStatus.NO_DATA)
+                                repository.getMonitorDetail(monitorId)
                             }
                             val freshGroups = freshDetail.groupStatuses
                                 .sortedBy { monitorStatusPriority(it.status) }
@@ -381,9 +370,8 @@ private fun MonitorBreakdownScreen(
             onConfirm = { durationMins ->
                 showMuteDialog = false
                 scope.launch {
-                    val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
-                    val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
-                    val state = MonitorWidgetState(prefs)
+                    val repository = MonitorDataRepository(context, appWidgetId)
+                    val state = repository.getSettings()
 
                     val result = performBulkMute(
                         context = context,
