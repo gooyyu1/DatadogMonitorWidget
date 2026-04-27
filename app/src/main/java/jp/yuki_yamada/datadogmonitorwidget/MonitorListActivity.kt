@@ -120,32 +120,32 @@ private fun MonitorListScreen(appWidgetId: Int) {
         appUrl = repository.getSettings().appUrl
 
         if (refreshKey == 0) {
-            // 初期表示: DataStore のキャッシュを即座に表示する
+            // 初期表示: DataStore のキャッシュを即座に表示する（自動リフレッシュは行わない）
             val cached = repository.getCachedMonitors()
             val sorted = cached.sortedBy { monitorStatusPriority(it.status) }
             initialSortedIds = sorted.map { it.id }
             monitors = sorted
             isLoading = false
-        }
-
-        // キャッシュ表示後もサーバーから最新データを取得して更新する
-        isFetchingFresh = true
-        val result = repository.refresh()
-        result.onSuccess { fresh ->
-            val freshById = fresh.associateBy { it.id }
-            if (initialSortedIds.isEmpty()) {
-                // キャッシュが空だった場合は取得結果でソート順を確定する
-                val sorted = fresh.sortedBy { monitorStatusPriority(it.status) }
-                initialSortedIds = sorted.map { it.id }
-                monitors = sorted
-            } else {
-                // 既存のソート順を維持しながらデータを更新する
-                monitors = initialSortedIds.mapNotNull { id -> freshById[id] }
+        } else {
+            // プルtoリロード時: サーバーから最新データを取得して更新する
+            isFetchingFresh = true
+            val result = repository.refresh()
+            result.onSuccess { fresh ->
+                val freshById = fresh.associateBy { it.id }
+                if (initialSortedIds.isEmpty()) {
+                    // キャッシュが空だった場合は取得結果でソート順を確定する
+                    val sorted = fresh.sortedBy { monitorStatusPriority(it.status) }
+                    initialSortedIds = sorted.map { it.id }
+                    monitors = sorted
+                } else {
+                    // 既存のソート順を維持しながらデータを更新する
+                    monitors = initialSortedIds.mapNotNull { id -> freshById[id] }
+                }
             }
+            isFetchingFresh = false
+            isRefreshing = false
+            isLoading = false
         }
-        isFetchingFresh = false
-        isRefreshing = false
-        isLoading = false
     }
 
     Scaffold(
