@@ -29,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ProgressIndicatorDefaults
@@ -36,10 +37,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,7 +98,7 @@ class MonitorDetailActivity : ComponentActivity() {
  * モニター詳細画面のメイン UI。
  * DataStore から現在のモニター情報を読み込み、リスト表示します。
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun MonitorDetailScreen(appWidgetId: Int) {
     val context = LocalContext.current
@@ -107,6 +110,8 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
     var isLoading by remember { mutableStateOf(true) }
     var updateProgress by remember { mutableFloatStateOf(0f) }
     var appUrl by remember { mutableStateOf("https://app.datadoghq.com/") }
+    var isRefreshing by remember { mutableStateOf(false) }
+    var refreshKey by remember { mutableIntStateOf(0) }
 
     // 選択モード（長押しで開始）の状態管理
     val selectedMonitorIds = remember { mutableStateListOf<Long>() }
@@ -115,7 +120,8 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
     var showMuteDialog by remember { mutableStateOf(false) }
 
     // 初期化時および更新時に DataStore からデータを読み込む
-    LaunchedEffect(appWidgetId) {
+    LaunchedEffect(appWidgetId, refreshKey) {
+        updateProgress = 0f
         val glanceId = GlanceAppWidgetManager(context).getGlanceIdBy(appWidgetId)
         val prefs = getAppWidgetState(context, PreferencesGlanceStateDefinition, glanceId)
         val state = MonitorWidgetState(prefs)
@@ -154,6 +160,7 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
                 updateProgress = (index + 1).toFloat() / sortedMonitors.size
             }
         }
+        isRefreshing = false
     }
 
     Scaffold(
@@ -207,9 +214,18 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
             }
         }
     ) { innerPadding ->
-        Column(
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                isRefreshing = true
+                refreshKey++
+            },
             modifier = Modifier
                 .padding(innerPadding)
+                .fillMaxSize()
+        ) {
+        Column(
+            modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
@@ -324,6 +340,7 @@ private fun MonitorDetailScreen(appWidgetId: Int) {
                     }
                 }
             }
+        }
         }
     }
 

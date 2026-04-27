@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -37,6 +38,7 @@ import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -106,7 +108,7 @@ class MonitorBreakdownActivity : ComponentActivity() {
  * 内訳表示画面のメイン UI。
  * ステータスごとにタブを分け、グループの一覧を表示します。
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun MonitorBreakdownScreen(
     appWidgetId: Int,
@@ -124,6 +126,7 @@ private fun MonitorBreakdownScreen(
         mutableStateOf(emptyList())
     }
     var isLoading by rememberSaveable { mutableStateOf(true) }
+    var isRefreshing by remember { mutableStateOf(false) }
     var appUrl by remember { mutableStateOf("https://app.datadoghq.com/") }
     var apiKey by remember { mutableStateOf("") }
     var appKey by remember { mutableStateOf("") }
@@ -211,9 +214,35 @@ private fun MonitorBreakdownScreen(
             }
         }
     ) { innerPadding ->
-        Column(
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = {
+                if (!isLoading && apiKey.isNotBlank() && appKey.isNotBlank() && monitorId > 0) {
+                    isRefreshing = true
+                    scope.launch {
+                        runCatching {
+                            val client = DatadogApiClient(apiKey, appKey, siteUrl)
+                            val freshDetail = withContext(Dispatchers.IO) {
+                                client.getMonitorDetail(monitorId, fallbackStatus = MonitorStatus.NO_DATA)
+                            }
+                            val freshGroups = freshDetail.groupStatuses
+                                .sortedBy { monitorStatusPriority(it.status) }
+                            if (freshGroups.isNotEmpty()) {
+                                groups = freshGroups
+                            }
+                        }.onFailure {
+                            Toast.makeText(context, R.string.refresh_failed, Toast.LENGTH_SHORT).show()
+                        }
+                        isRefreshing = false
+                    }
+                }
+            },
             modifier = Modifier
                 .padding(innerPadding)
+                .fillMaxSize()
+        ) {
+        Column(
+            modifier = Modifier
                 .padding(top = 16.dp)
                 .fillMaxSize()
         ) {
@@ -341,6 +370,7 @@ private fun MonitorBreakdownScreen(
                     }
                 }
             }
+        }
         }
     }
 
