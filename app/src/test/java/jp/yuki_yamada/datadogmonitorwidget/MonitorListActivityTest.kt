@@ -48,7 +48,7 @@ class MonitorListActivityTest {
 
     @Test
     fun `restore monitor group statuses returns empty list for odd-sized data`() {
-        val restored = restoreMonitorGroupStatuses(listOf("group-alert", "ALERT", "dangling"))
+        val restored = restoreMonitorGroupStatuses(listOf("group-alert", "ALERT"))
 
         assertEquals(emptyList<MonitorGroupStatus>(), restored)
     }

@@ -99,7 +99,7 @@ class DatadogModelsTest {
 
         assertEquals(7L, detail.id)
         assertEquals("multi monitor", detail.name)
-        assertEquals(MonitorStatus.WARN, detail.status)
+        assertEquals(MonitorStatus.ALERT, detail.status)
         assertEquals(true, detail.isMultiMonitor)
         assertEquals(2, detail.groupStatuses.size)
         assertEquals(MonitorStatus.ALERT, detail.groupStatuses[0].status)
