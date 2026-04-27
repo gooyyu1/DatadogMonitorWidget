@@ -43,9 +43,9 @@
             </intent-filter>
         </activity>
         <activity
-            android:name=".MonitorDetailActivity"
+            android:name=".MonitorListActivity"
             android:exported="false"
-            android:label="Monitor details"
+            android:label="Monitor list"
             android:theme="@style/Theme.DatadogMonitorWidget" />
         <activity
             android:name=".MonitorBreakdownActivity"

@@ -69,7 +69,7 @@ class MonitorWidget : GlanceAppWidget() {
 
             val appWidgetId = state.appWidgetId
             // ウィジェットをタップした際に開くアクティビティ（詳細画面）の定義
-            val detailsIntent = Intent(context, MonitorDetailActivity::class.java).apply {
+            val detailsIntent = Intent(context, MonitorListActivity::class.java).apply {
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
             }
 

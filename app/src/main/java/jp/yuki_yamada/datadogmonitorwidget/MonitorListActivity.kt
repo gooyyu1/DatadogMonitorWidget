@@ -62,10 +62,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
 /**
- * ウィジェットをタップした際に表示される、モニター一覧の詳細画面。
+ * ウィジェットをタップした際に表示される、モニター一覧画面。
  * 複数のモニターの状態を一括で確認したり、ミュート操作を行ったりすることができます。
  */
-class MonitorDetailActivity : ComponentActivity() {
+class MonitorListActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val appWidgetId = intent.getIntExtra(
@@ -80,19 +80,19 @@ class MonitorDetailActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             DatadogMonitorWidgetTheme {
-                MonitorDetailScreen(appWidgetId = appWidgetId)
+                MonitorListScreen(appWidgetId = appWidgetId)
             }
         }
     }
 }
 
 /**
- * モニター詳細画面のメイン UI。
+ * モニター一覧画面のメイン UI。
  * [MonitorDataRepository] からモニター情報を読み込み、リスト表示します。
  */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun MonitorDetailScreen(appWidgetId: Int) {
+private fun MonitorListScreen(appWidgetId: Int) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val json = remember { Json { ignoreUnknownKeys = true; prettyPrint = true } }

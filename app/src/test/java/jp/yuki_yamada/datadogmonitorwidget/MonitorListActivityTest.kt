@@ -4,7 +4,7 @@ import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-class MonitorDetailActivityTest {
+class MonitorListActivityTest {
 
     private val json = Json { ignoreUnknownKeys = true }
 
