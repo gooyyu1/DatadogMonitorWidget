@@ -114,6 +114,13 @@ class MonitorDataRepository(
      */
     suspend fun getMonitorDetail(monitorId: Long): MonitorDetail {
         val settings = getSettings()
+        if (settings.apiKey.isEmpty() || settings.appKey.isEmpty()) {
+            return MonitorDetail(
+                id = monitorId,
+                name = "API Key or App Key is missing",
+                status = MonitorStatus.NO_DATA
+            )
+        }
         val client = DatadogApiClient(settings.apiKey, settings.appKey, settings.siteUrl)
         return client.getMonitorDetail(monitorId)
     }
