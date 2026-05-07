@@ -19,6 +19,11 @@ class MonitorWorker(
     private val workerParams: WorkerParameters
 ) : CoroutineWorker(context, workerParams) {
 
+    companion object {
+        /** 設定が取得できない場合に使用するデフォルトの更新間隔（分） */
+        private const val DEFAULT_INTERVAL_MINS = 5L
+    }
+
     /**
      * 非同期でのデータ取得処理の本体。
      * [MonitorDataRepository] を通じてデータを取得し、DataStore とウィジェットを更新します。
@@ -28,16 +33,27 @@ class MonitorWorker(
         if (appWidgetId == -1) return ListenableWorker.Result.failure()
 
         val repository = MonitorDataRepository(context, appWidgetId)
+
         // 設定された間隔を先に読んでおく（refresh() が DataStore を書き換える前に取得）
-        val interval = repository.getSettings().intervalMin
+        // 例外が発生した場合はデフォルト値を使用してチェーンを維持する
+        val intervalMins = try {
+            repository.getSettings().intervalMin.toLongOrNull() ?: DEFAULT_INTERVAL_MINS
+        } catch (e: Exception) {
+            DEFAULT_INTERVAL_MINS
+        }
 
-        val result = repository.refresh()
+        // データを取得する。refresh() 内部でも例外を捕捉しているが、念のため保護する
+        val refreshResult: kotlin.Result<List<MonitorDetail>> = try {
+            repository.refresh()
+        } catch (e: Exception) {
+            kotlin.Result.failure(e)
+        }
 
-        // 設定された間隔で次回の更新を予約
-        val intervalMins = interval.toLongOrNull() ?: 5L
+        // 設定された間隔で次回の更新を予約する。
+        // エラーが発生してもここに必ず到達し、チェーンを維持する。
         scheduleNextWork(appWidgetId, intervalMins)
 
-        return if (result.isSuccess) ListenableWorker.Result.success()
+        return if (refreshResult.isSuccess) ListenableWorker.Result.success()
         else ListenableWorker.Result.failure()
     }
 
