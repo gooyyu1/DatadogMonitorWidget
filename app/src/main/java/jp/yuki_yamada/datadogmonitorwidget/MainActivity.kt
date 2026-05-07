@@ -2,7 +2,11 @@ package jp.yuki_yamada.datadogmonitorwidget
 
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -20,11 +24,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import jp.yuki_yamada.datadogmonitorwidget.ui.theme.DatadogMonitorWidgetTheme
@@ -32,10 +40,18 @@ import jp.yuki_yamada.datadogmonitorwidget.ui.theme.DatadogMonitorWidgetTheme
 /**
  * アプリのメインエントリポイントとなるアクティビティ。
  * ウィジェットの追加方法の案内と、ホーム画面へのピン留め機能を提供します。
+ * また、バッテリー最適化の除外設定へのアクセスも提供します。
  */
 class MainActivity : ComponentActivity() {
+
+    // バッテリー最適化から除外されているかどうかを Compose で観察可能な状態として保持する
+    private var isIgnoringBatteryOptimizations by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 初期状態を onCreate で設定する（onResume でも更新される）
+        val powerManager = getSystemService(PowerManager::class.java)
+        isIgnoringBatteryOptimizations = powerManager.isIgnoringBatteryOptimizations(packageName)
         enableEdgeToEdge()
         setContent {
             DatadogMonitorWidgetTheme {
@@ -67,10 +83,19 @@ class MainActivity : ComponentActivity() {
                         )
                         Spacer(modifier = Modifier.height(32.dp))
                         AddWidgetButton()
+                        Spacer(modifier = Modifier.height(16.dp))
+                        BatteryOptimizationSection(isIgnoringBatteryOptimizations)
                     }
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 設定画面から戻ったときにバッテリー最適化の状態を更新する
+        val powerManager = getSystemService(PowerManager::class.java)
+        isIgnoringBatteryOptimizations = powerManager.isIgnoringBatteryOptimizations(packageName)
     }
 }
 
@@ -91,6 +116,43 @@ fun AddWidgetButton() {
             }
         ) {
             Text("Add Widget to Home Screen")
+        }
+    }
+}
+
+/**
+ * バッテリー最適化の状態を表示し、除外設定を行うためのセクション。
+ * [isIgnoring] が false のときは警告と設定ボタンを表示する。
+ */
+@Composable
+fun BatteryOptimizationSection(isIgnoring: Boolean) {
+    val context = LocalContext.current
+    val packageName = context.packageName
+
+    if (isIgnoring) {
+        Text(
+            text = stringResource(R.string.battery_optimization_ok),
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.bodyMedium
+        )
+    } else {
+        Text(
+            text = stringResource(R.string.battery_optimization_warning),
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = {
+                // このアプリをバッテリー最適化から除外するようシステムに直接要求する
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                context.startActivity(intent)
+            }
+        ) {
+            Text(stringResource(R.string.disable_battery_optimization))
         }
     }
 }

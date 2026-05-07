@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Datadog Monitor Widget</string>
+    <string name="monitor_details_title">モニター一覧</string>
+    <string name="monitor_breakdown_title">モニター内訳</string>
+    <string name="no_monitor_data">モニターデータなし</string>
+    <string name="open_datadog_app">Datadogを開く</string>
+    <string name="open_widget_settings">設定を開く</string>
+    <string name="refresh_failed">更新失敗</string>
+    <string name="battery_optimization_warning">バッテリー最適化が有効なため、ウィジェットの定期更新が停止することがあります。除外設定を行うと更新が安定します。</string>
+    <string name="disable_battery_optimization">バッテリー最適化から除外する</string>
+    <string name="battery_optimization_ok">バッテリー最適化: 除外済み ✓</string>
+</resources>

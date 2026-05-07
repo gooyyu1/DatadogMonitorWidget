@@ -6,4 +6,7 @@
     <string name="open_datadog_app">Open Datadog app</string>
     <string name="open_widget_settings">Open settings</string>
     <string name="refresh_failed">Refresh failed</string>
+    <string name="battery_optimization_warning">Battery optimization may stop widget updates. Excluding this app will make updates more reliable.</string>
+    <string name="disable_battery_optimization">Exclude from Battery Optimization</string>
+    <string name="battery_optimization_ok">Battery optimization: excluded ✓</string>
 </resources>
